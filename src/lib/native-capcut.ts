@@ -5,7 +5,7 @@ import { cp, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises"
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { editingToolContext } from "./editing-context";
-import { listProjects } from "./keyframe-helper";
+import { listProjects, readProjectDraft, resolveTimelineClip } from "./keyframe-helper";
 import { codexExecutable, runCodexStream } from "./reference-analysis";
 
 const run = promisify(execFile);
@@ -17,7 +17,8 @@ const activeProjects = new Set<string>();
 
 type ApplyInput = {
   projectId: string;
-  rawVideo: File;
+  rawVideo?: File | null;
+  clipId?: string;
   prompt: string;
   reference?: File | null;
   savedReferencePath?: string | null;
@@ -47,6 +48,12 @@ async function capcut(args: string[], timeout = 120_000) {
       return await run(process.execPath, [cli, ...args], { cwd: workspace, timeout, maxBuffer: 4_000_000 });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (args[0] === "lint") {
+        const output = String((error as { stdout?: string }).stdout ?? "");
+        try {
+          if ((JSON.parse(output) as { ok?: boolean }).ok) return { stdout: output, stderr: String((error as { stderr?: string }).stderr ?? "") };
+        } catch { /* Preserve the original command error if lint returned invalid JSON. */ }
+      }
       if (attempt === 3 || !/EPERM: operation not permitted, rename/.test(message) ||
         !/\.bak\.capcut-cli-[^\s]*\.tmp/.test(message)) throw error;
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 250 * (attempt + 1)));
@@ -128,6 +135,7 @@ async function createPlan(input: ApplyInput, media: { path: string; width: numbe
     "Detect every distinct technique actually visible or audible in the reference and apply the full edit automatically. There is no checkbox selection. The user's prompt may narrow or modify what to copy.",
     `Reference file: ${reference.path ?? "none"}. Target footage: ${media.path}. Target dimensions: ${media.width}x${media.height}; duration ${duration.toFixed(3)}s.`,
     `Write a CapCut CLI compile specification at ${specPath}. First track must be the original footage at the target path, 0s to ${duration.toFixed(3)}s, with ref "source". All generated media assets must be inside ${job}. Do not edit the CapCut project yourself. Do not write outside this job folder.`,
+    input.clipId ? "This edit targets ONE existing timeline clip. Work in local clip time starting at zero; the app will offset added layers to its actual timeline position. Keep the same duration. Existing clip placement, crop, volume, and surrounding timeline will be retained. Generate additional native transforms relative to the existing transform. Use rendered per-clip visual layers for color/effects; do not use scene-wide effect/filter operations, which would affect other overlapping clips. Visual layers must have no source audio; put explicitly requested new audio on separate audio tracks." : "This edit will populate an empty project.",
     `Tools: FFmpeg ${ffmpeg}; FFprobe ${ffprobe}; CapCut CLI ${cli}; Remotion ${join(workspace, "toolchain", "node_modules", "@remotion", "cli", "remotion-cli.js")}; HyperFrames ${join(workspace, "toolchain", "node_modules", "hyperframes", "bin", "hyperframes.mjs")}. CapCut CLI docs ${join(workspace, "toolchain", "node_modules", "capcut-cli", "docs", "command-reference.md")}. Create any needed Remotion composition inside this job folder, using the installed packages; no prebuilt composition is required. Read tool docs before use.`,
     `Editing contract:\n${editingToolContext(Boolean(process.env.GROQ_API_KEY))}`,
     "Choose actual tools from the detected techniques. Use native CapCut keyframes/text when they can match. For complex color/channel effects use FFmpeg to produce a separate timed video layer; for animated graphics use Remotion when needed, and HyperFrames for captions or static graphics when needed. Preserve the original footage under hybrid layers. Avoid redundant full-frame layers and do not use a static image for a moving effect. Match timings, positions, shapes, colors, and easing from the reference as closely as the evidence permits. Never invent an effect absent from the prompt/reference.",
@@ -143,6 +151,9 @@ async function createPlan(input: ApplyInput, media: { path: string; width: numbe
     throw new Error(`Could not apply the full reference edit: ${manifest.limitations?.join("; ") || manifest.notes}`);
   }
   const spec = JSON.parse(await readFile(specPath, "utf8")) as Spec;
+  if (input.clipId && spec.operations?.some((operation) => ["effect", "filter"].includes(String((operation as { op?: string }).op)))) {
+    throw new Error("The selected-clip plan used a scene-wide effect. It must render that effect on a clip layer to preserve other footage.");
+  }
   await validatePlan(spec, manifest, media.path, job, media.width, media.height, duration);
   return { specPath, manifest, referencePath: reference.path };
 }
@@ -185,10 +196,10 @@ async function validatePlan(spec: Spec, manifest: Manifest, source: string, job:
 }
 
 export async function applyNativeCapCut(input: ApplyInput) {
-  if (!input.projectId || !(input.rawVideo instanceof File) || !input.prompt?.trim()) {
-    throw new Error("Select an empty CapCut project, raw video, and reference, then enter your prompt.");
+  if (!input.projectId || (!input.clipId && !(input.rawVideo instanceof File)) || !input.prompt?.trim()) {
+    throw new Error("Select a project and timeline clip or raw video, then attach a reference and enter your prompt.");
   }
-  if (input.rawVideo.size > 200 * 1024 * 1024 || ![".mp4", ".mov", ".mkv", ".webm"].includes(extname(input.rawVideo.name).toLowerCase())) {
+  if (input.rawVideo && (input.rawVideo.size > 200 * 1024 * 1024 || ![".mp4", ".mov", ".mkv", ".webm"].includes(extname(input.rawVideo.name).toLowerCase()))) {
     throw new Error("Raw footage must be an MP4, MOV, MKV, or WebM file under 200 MB.");
   }
   if (activeProjects.has(input.projectId)) throw new Error("This CapCut project is already being edited.");
@@ -196,11 +207,12 @@ export async function applyNativeCapCut(input: ApplyInput) {
   try {
     const project = (await listProjects()).find((item) => item.id === input.projectId);
     if (!project) throw new Error("Selected CapCut project was not found. Refresh projects.");
-    const draft = JSON.parse(await readFile(join(project.path, "draft_content.json"), "utf8")) as {
-      tracks?: { segments?: unknown[] }[];
-    };
-    if (draft.tracks?.some((track) => track.segments?.length)) {
-      throw new Error("Choose an empty CapCut project. Its timeline already contains clips; no changes were made.");
+    const snapshot = await readProjectDraft(project.id);
+    const selected = input.clipId ? await resolveTimelineClip(project.id, input.clipId) : null;
+    if (project.hasTimelineContent && !selected) throw new Error("Select the timeline clip to edit in this project.");
+    if (selected && selected.draft.materials?.speeds?.some((speed) =>
+      selected.segment.extra_material_refs?.includes(speed.id) && speed.curve_speed)) {
+      throw new Error("This clip uses a speed curve. Choose a clip with constant playback speed; the project was not changed.");
     }
     if (await capCutIsRunning()) throw new Error("Close CapCut before Run so it cannot overwrite the edited draft. Reopen it after Run completes.");
     const jobs = join(workspace, ".local-tools", "native-assets");
@@ -208,8 +220,27 @@ export async function applyNativeCapCut(input: ApplyInput) {
     const backupRoot = join(workspace, ".local-tools", "backups");
     await Promise.all([mkdir(jobs, { recursive: true }), mkdir(stagingRoot, { recursive: true }), mkdir(backupRoot, { recursive: true })]);
     const job = await mkdtemp(join(jobs, "edit-"));
-    const source = join(job, `raw${extname(input.rawVideo.name).toLowerCase()}`);
-    await writeFile(source, Buffer.from(await input.rawVideo.arrayBuffer()));
+    const source = join(job, selected ? "raw.mp4" : `raw${extname(input.rawVideo!.name).toLowerCase()}`);
+    if (selected) {
+      input.onLog?.(`Preparing only ${selected.material.material_name || "the selected clip"} at ${(selected.segment.target_timerange.start / 1_000_000).toFixed(2)}s on the timeline.`);
+      const targetSeconds = selected.segment.target_timerange.duration / 1_000_000;
+      const sourceSeconds = (selected.segment.source_timerange?.duration ?? selected.segment.target_timerange.duration) / 1_000_000;
+      const speed = sourceSeconds / targetSeconds;
+      if (!Number.isFinite(speed) || speed <= 0 || !Number.isFinite(targetSeconds) || targetSeconds < 0.1) throw new Error("The selected clip has invalid timing.");
+      const { stdout: sourceProbe } = await run(ffprobe, ["-v", "error", "-show_entries", "stream=codec_type", "-of", "json", selected.mediaPath], { timeout: 15000 });
+      const hasAudio = (JSON.parse(sourceProbe) as { streams?: { codec_type: string }[] }).streams?.some((stream) => stream.codec_type === "audio");
+      const audioFilters: string[] = selected.segment.reverse ? ["areverse"] : [];
+      let tempo = speed;
+      while (tempo < 0.5) { audioFilters.push("atempo=0.5"); tempo /= 0.5; }
+      while (tempo > 2) { audioFilters.push("atempo=2"); tempo /= 2; }
+      audioFilters.push(`atempo=${tempo}`);
+      await run(ffmpeg, ["-hide_banner", "-loglevel", "error", "-y", "-ss", String((selected.segment.source_timerange?.start ?? 0) / 1_000_000),
+        "-t", String(sourceSeconds), "-i", selected.mediaPath, "-map", "0:v:0", "-map", "0:a?",
+        "-vf", `${selected.segment.reverse ? "reverse," : ""}setpts=(PTS-STARTPTS)/${speed}`,
+        ...(hasAudio ? ["-af", audioFilters.join(",")] : []), "-t", String(targetSeconds),
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", source],
+      { timeout: 180_000, maxBuffer: 2_000_000 });
+    } else await writeFile(source, Buffer.from(await input.rawVideo!.arrayBuffer()));
     const { stdout } = await run(ffprobe, ["-v", "error", "-show_entries", "format=duration:stream=codec_type,width,height,r_frame_rate", "-of", "json", source],
       { timeout: 30_000, maxBuffer: 1_000_000 });
     const probe = JSON.parse(stdout) as { format?: { duration?: string }; streams?: {
@@ -220,22 +251,37 @@ export async function applyNativeCapCut(input: ApplyInput) {
     if (!Number.isFinite(duration) || duration < 0.1 || !video?.width || !video?.height || video.width < 64 || video.height < 64) {
       throw new Error("The raw footage does not contain a readable video stream.");
     }
-    const media = { path: source, width: video.width, height: video.height, durationUs: Math.round(duration * 1_000_000) };
+    if (selected && Math.abs(duration * 1_000_000 - selected.segment.target_timerange.duration) > 100_000) throw new Error("The extracted clip did not match its timeline duration.");
+    const canvas = selected?.draft.canvas_config;
+    const media = { path: source, width: canvas?.width || video.width, height: canvas?.height || video.height,
+      durationUs: selected?.segment.target_timerange.duration ?? Math.round(duration * 1_000_000) };
     input.onLog?.("Preparing reference and raw footage for Codex analysis.");
     const { specPath, manifest, referencePath } = await createPlan(input, media, job);
     input.onLog?.("Codex finished its edit plan. Validating a temporary CapCut draft.");
     const staging = await mkdtemp(join(stagingRoot, "validate-"));
     await cp(project.path, staging, { recursive: true });
-    await capcut(["compile", specPath, "--into", staging, "--active-timeline", "--check"]);
-    await capcut(["compile", specPath, "--into", staging, "--active-timeline"]);
+    const generated = join(job, "generated-draft");
+    const merge = async (destination: string) => {
+      await run(process.execPath, [join(workspace, "scripts", "merge-clip-edit.mjs"), destination, generated, input.clipId!],
+        { cwd: workspace, timeout: 120_000, maxBuffer: 2_000_000 });
+    };
+    if (selected) {
+      await capcut(["compile", specPath, "--out", generated, "--template", project.path]);
+      await merge(staging);
+    } else {
+      await capcut(["compile", specPath, "--into", staging, "--active-timeline", "--check"]);
+      await capcut(["compile", specPath, "--into", staging, "--active-timeline"]);
+    }
     const stagedLint = JSON.parse((await capcut(["lint", staging, "--json"])).stdout) as { ok: boolean };
     if (!stagedLint.ok) throw new Error("The staged CapCut edit did not pass draft validation. The project was not changed.");
     if (await capCutIsRunning()) throw new Error("CapCut reopened while planning. Close it and run again; the project was not changed.");
+    if ((await readProjectDraft(project.id)).raw !== snapshot.raw) throw new Error("The CapCut timeline changed while planning. Refresh and run again; no edit was written.");
     const backup = join(backupRoot, `${project.id}-${randomUUID()}`);
     await cp(project.path, backup, { recursive: true });
     try {
       input.onLog?.("Staged draft passed validation. Writing the edit to the selected CapCut project.");
-      await capcut(["compile", specPath, "--into", project.path, "--active-timeline"]);
+      if (selected) await merge(project.path);
+      else await capcut(["compile", specPath, "--into", project.path, "--active-timeline"]);
       const liveLint = JSON.parse((await capcut(["lint", project.path, "--json"])).stdout) as { ok: boolean };
       if (!liveLint.ok) throw new Error("The updated CapCut draft failed validation.");
     } catch (error) {
@@ -243,9 +289,9 @@ export async function applyNativeCapCut(input: ApplyInput) {
       throw new Error(`The edit failed and the backup was restored. ${error instanceof Error ? error.message : String(error)}`);
     }
     input.onLog?.("CapCut draft passed lint. Open the project in CapCut to review its visual result.");
-    return { projectName: project.name, applied: manifest.effects.map((effect) => effect.technique),
+    return { projectId: project.id, projectName: project.name, applied: manifest.effects.map((effect) => effect.technique),
       toolsUsed: manifest.toolsUsed, notes: manifest.notes, backup, jobPath: job,
-      referencePath, effects: manifest.effects, prompt: input.prompt, sourceName: input.rawVideo.name };
+      referencePath, effects: manifest.effects, prompt: input.prompt, sourceName: selected?.material.material_name || input.rawVideo?.name || "Timeline clip" };
   } finally {
     activeProjects.delete(input.projectId);
   }

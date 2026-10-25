@@ -39,12 +39,13 @@ export async function listEditRecipes(): Promise<SavedRecipe[]> {
 
 export async function startEditJob(input: {
   projectId: string;
-  rawVideo: File;
+  rawVideo?: File | null;
+  clipId?: string;
   reference?: File | null;
   recipeId?: string;
   prompt: string;
 }) {
-  if (!input.projectId || !(input.rawVideo instanceof File)) throw new Error("Choose a CapCut project and raw video.");
+  if (!input.projectId || (!input.clipId && !(input.rawVideo instanceof File))) throw new Error("Choose a project and a timeline clip or raw video.");
   const recipe = input.recipeId ? (await listEditRecipes()).find((item) => item.id === input.recipeId) : undefined;
   if (input.recipeId && !recipe) throw new Error("Saved recipe not found.");
   if (!input.reference && !recipe) throw new Error("Attach a reference video or choose a saved recipe.");
@@ -64,6 +65,7 @@ export async function startEditJob(input: {
       job.result = await applyNativeCapCut({
         projectId: input.projectId,
         rawVideo: input.rawVideo,
+        clipId: input.clipId,
         reference: input.reference,
         savedReferencePath: recipe?.referencePath,
         prompt,
@@ -102,6 +104,7 @@ export async function getEditJob(id: string, since = 0) {
     next: job.transcript.length,
     error: job.error,
     result: job.result && {
+      projectId: job.result.projectId,
       projectName: job.result.projectName,
       applied: job.result.applied,
       toolsUsed: job.result.toolsUsed,

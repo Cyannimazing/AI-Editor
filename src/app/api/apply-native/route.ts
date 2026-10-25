@@ -17,10 +17,12 @@ export async function POST(request: Request) {
     const form = await request.formData();
     const rawVideo = form.get("rawVideo");
     const reference = form.get("reference");
-    if (!(rawVideo instanceof File)) throw new Error("Attach raw video footage.");
+    const clipId = String(form.get("clipId") ?? "");
+    if (!clipId && !(rawVideo instanceof File)) throw new Error("Select a timeline clip or attach raw video footage.");
     const id = await startEditJob({
       projectId: String(form.get("projectId") ?? ""),
-      rawVideo,
+      rawVideo: rawVideo instanceof File ? rawVideo : null,
+      clipId,
       reference: reference instanceof File ? reference : null,
       recipeId: String(form.get("recipeId") ?? ""),
       prompt: String(form.get("prompt") ?? ""),
