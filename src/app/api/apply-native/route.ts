@@ -1,4 +1,4 @@
-import { getEditJob, startEditJob } from "@/lib/edit-jobs";
+import { cancelEditJob, getEditJob, startEditJob } from "@/lib/edit-jobs";
 
 function localRequest(request: Request) {
   const url = new URL(request.url);
@@ -40,5 +40,14 @@ export async function GET(request: Request) {
     return Response.json(await getEditJob(url.searchParams.get("id") ?? "", Number(url.searchParams.get("since") ?? 0)));
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Could not load the edit job." }, { status: 400 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  if (!localRequest(request)) return Response.json({ error: "Local access only." }, { status: 403 });
+  try {
+    return Response.json(await cancelEditJob(new URL(request.url).searchParams.get("id") ?? ""));
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "Could not cancel the run." }, { status: 409 });
   }
 }

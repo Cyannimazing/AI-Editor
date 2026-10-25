@@ -106,11 +106,13 @@ async function downloadFfmpeg() {
 async function installMotionTools() {
   const remotion = join(toolchain, 'node_modules', 'remotion', 'package.json');
   const hyperframes = join(toolchain, 'node_modules', 'hyperframes', 'package.json');
-  if (existsSync(remotion) && existsSync(hyperframes)) return;
-  await status('motion', 82, 'Installing Remotion and HyperFrames with pnpm');
+  const remotionCli = join(toolchain, 'node_modules', '@remotion', 'cli', 'remotion-cli.js');
+  const capcutCli = join(toolchain, 'node_modules', 'capcut-cli', 'dist', 'index.js');
+  if ([remotion, hyperframes, remotionCli, capcutCli].every(existsSync)) return;
+  await status('motion', 82, 'Installing Remotion, HyperFrames and CapCut CLI with pnpm');
   await run(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm',
     ['install', '--no-frozen-lockfile', '--ignore-workspace'], toolchain);
-  if (!existsSync(remotion) || !existsSync(hyperframes)) {
+  if (![remotion, hyperframes, remotionCli, capcutCli].every(existsSync)) {
     throw new Error('The motion tool packages were not installed.');
   }
 }

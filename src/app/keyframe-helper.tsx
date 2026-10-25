@@ -6,12 +6,13 @@ import Image from "next/image";
 type Clip = { id: string; name: string; trackName: string; startUs: number; durationUs: number };
 type Project = { id: string; name: string; hasTimelineContent: boolean; clips: Clip[] };
 type Recipe = { id: string; name: string; prompt: string; effects: string[]; createdAt: string };
-type EditResult = { projectId: string; projectName: string; applied: string[]; toolsUsed: string[]; notes: string; backup: string };
-type Job = { id: string; status: "running" | "complete" | "failed"; transcript: string[]; next: number; error?: string; result?: EditResult };
+type EditResult = { projectId: string; projectName: string; applied: string[]; toolsUsed: string[]; notes: string; backup: string;
+  model?: string; access?: string; iterations?: number; verified?: boolean; evidencePath?: string };
+type Job = { id: string; status: "running" | "cancelling" | "cancelled" | "complete" | "failed"; canCancel: boolean; transcript: string[]; next: number; error?: string; result?: EditResult };
 
 const field = "mt-2 w-full rounded-xl border border-white/15 bg-[#0b1220] px-4 py-3 text-sm text-slate-100 outline-none focus:border-emerald-300";
 const button = "min-h-11 rounded-xl bg-emerald-300 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-40";
-const defaultPrompt = "Watch the reference video, identify its editing techniques and timing, and apply that edit to my raw footage.";
+const defaultPrompt = "Watch the entire reference frame by frame and replicate its techniques on my footage inside CapCut. Match text size, proportions, zooms, easing, smears, effects and audio wherever present. Use Remotion for motion, HyperFrames for captions/graphics, and FFmpeg for cuts/mixes. Keep native editable text, keyframes, effects and compounds. Close CapCut before editing; open it for native playback comparison, then close and revise until every technique matches. Keep settled graphics sharp. Do not use AI Edit or a flattened MP4.";
 
 function transcriptLine(line: string) {
   try {
@@ -39,8 +40,10 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
   const [result, setResult] = useState<EditResult | null>(null);
   const [recipeName, setRecipeName] = useState("");
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [starting, setStarting] = useState(false);
+  const [canCancel, setCanCancel] = useState(false);
   const offset = useRef(0);
   const transcriptEnd = useRef<HTMLDivElement>(null);
 
@@ -69,23 +72,29 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
   useEffect(() => {
     void Promise.resolve().then(() => {
       const previous = window.sessionStorage.getItem("ai-editor-last-job");
+      const skillName = window.sessionStorage.getItem("ai-editor-skill-name");
+      if (skillName) setRecipeName(skillName);
       if (previous) { setJobId(previous); setStatus("running"); }
     });
   }, []);
 
   useEffect(() => {
-    if (!jobId || status !== "running") return;
+    if (!jobId || !["running", "cancelling"].includes(status)) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     async function poll() {
       try {
         const response = await fetch(`/api/apply-native?id=${encodeURIComponent(jobId)}&since=${offset.current}`, { cache: "no-store" });
         const data = await response.json() as Job & { error?: string };
-        if (!response.ok) throw new Error(data.error || "Could not read the Codex transcript.");
+        if (!response.ok) {
+          if (!cancelled) { setStatus("failed"); setCanCancel(false); setError(data.error || "Could not read the Codex transcript."); }
+          return;
+        }
         if (cancelled) return;
         offset.current = data.next;
+        setCanCancel(data.canCancel);
         if (data.transcript.length) setTranscript((current) => [...current, ...data.transcript]);
-        if (data.status === "running") timer = setTimeout(poll, 1200);
+        if (["running", "cancelling"].includes(data.status)) timer = setTimeout(poll, 1200);
         else {
           setStatus(data.status);
           if (data.error) setError(data.error);
@@ -96,8 +105,8 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
         }
       } catch (cause) {
         if (!cancelled) {
-          setStatus("failed");
-          setError(cause instanceof Error ? cause.message : "Could not read the edit progress.");
+          setError(cause instanceof Error ? `${cause.message} Reconnecting to the active run…` : "Reconnecting to the active run…");
+          timer = setTimeout(poll, 2000);
         }
       }
     }
@@ -110,6 +119,7 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
   async function runEdit() {
     if (!projectId || !targetReady || (!reference && !recipeId)) return;
     setStarting(true);
+    setCanCancel(false);
     setError("");
     setResult(null);
     setSaved(false);
@@ -129,8 +139,13 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
       if (!response.ok) throw new Error(data.error || "Could not start the edit.");
       window.sessionStorage.setItem("ai-editor-last-job", data.id);
       setStatus("running");
+      setCanCancel(true);
       setJobId(data.id);
-      setRecipeName(`${reference?.name.replace(/\.[^.]+$/, "") ?? recipes.find((item) => item.id === recipeId)?.name ?? "Reference"} edit`);
+      if (!recipeName.trim()) {
+        const name = `${reference?.name.replace(/\.[^.]+$/, "") ?? recipes.find((item) => item.id === recipeId)?.name ?? "Reference"} edit`;
+        setRecipeName(name);
+        window.sessionStorage.setItem("ai-editor-skill-name", name);
+      }
     } catch (cause) {
       setStatus("failed");
       setError(cause instanceof Error ? cause.message : "Could not start the edit.");
@@ -139,17 +154,35 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
     }
   }
 
+  async function cancelRun() {
+    if (!jobId || !canCancel) return;
+    setCanCancel(false);
+    setError("");
+    try {
+      const response = await fetch(`/api/apply-native?id=${encodeURIComponent(jobId)}`, { method: "DELETE" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not cancel the run.");
+      setStatus("cancelling");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not cancel the run.");
+    }
+  }
+
   async function saveRecipe() {
     if (!jobId || !result) return;
+    setSaving(true);
+    setError("");
     try {
       const response = await fetch("/api/edit-recipes", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId, name: recipeName }) });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not save the recipe.");
+      if (!response.ok) throw new Error(data.error || "Could not save the skill.");
       setSaved(true);
       await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save the recipe.");
+      setError(cause instanceof Error ? cause.message : "Could not save the skill.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -164,7 +197,14 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
     }
   }
 
-  const running = starting || status === "running";
+  const running = starting || status === "running" || status === "cancelling";
+  const skillSaved = saved || recipes.some((recipe) => recipe.id === jobId);
+
+  function selectSkill(recipe: Recipe) {
+    setRecipeId(recipe.id);
+    setReference(null);
+    setPrompt(recipe.prompt);
+  }
 
   return <main className="min-h-screen bg-[#080c14] px-4 py-8 text-slate-100 sm:px-8">
     <div className="mx-auto max-w-6xl space-y-6">
@@ -209,9 +249,9 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
             <input className={field} type="file" accept="video/*,image/*" disabled={running} onChange={(event) => { setReference(event.target.files?.[0] ?? null); setRecipeId(""); }} />
           </label>
           {reference && <p className="text-xs text-slate-400">Style source: {reference.name}</p>}
-          {recipes.length > 0 && <label className="block text-sm text-slate-300">Or reuse a saved whole-edit recipe
-            <select className={field} value={recipeId} disabled={running} onChange={(event) => { const id = event.target.value; setRecipeId(id); if (id) { setReference(null); setPrompt(recipes.find((item) => item.id === id)?.prompt ?? defaultPrompt); } }}>
-              <option value="">Choose a recipe</option>
+          {recipes.length > 0 && <label className="block text-sm text-slate-300">Or reuse a saved skill
+            <select className={field} value={recipeId} disabled={running} onChange={(event) => { const id = event.target.value; setRecipeId(id); const recipe = recipes.find((item) => item.id === id); if (recipe) selectSkill(recipe); }}>
+              <option value="">Choose a skill</option>
               {recipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
             </select>
           </label>}
@@ -223,13 +263,37 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
 
       <section className="rounded-2xl border border-white/10 bg-[#111b2a] p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div><h2 className="text-lg font-semibold">Run the edit</h2><p className="mt-1 text-xs leading-5 text-slate-400">CapCut must be closed while Run writes the draft. Open it after the edit completes.</p></div>
-          <button className={button} disabled={!setupComplete || running || !targetReady || (!reference && !recipeId)} onClick={() => void runEdit()}>{starting ? "Starting…" : running ? "Codex is editing…" : "Run"}</button>
+          <div><h2 className="text-lg font-semibold">Run the edit</h2><p className="mt-1 text-xs font-medium text-emerald-300">GPT-6.1 Sol · Full Access</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400">Remotion · HyperFrames · FFmpeg. CapCut closes for draft changes and opens for native comparison. The CLI revises a candidate until the reference techniques match, then backs up and updates your project. Save your work before Run and leave the desktop available for review.</p>{status === "cancelled" && <p className="mt-2 text-sm text-amber-200" role="status">Run cancelled. No edit was written to CapCut.</p>}</div>
+          <div className="flex flex-wrap gap-3"><button className={button} disabled={!setupComplete || running || !targetReady || (!reference && !recipeId)} onClick={() => void runEdit()}>{starting ? "Starting…" : status === "cancelling" ? "Cancelling…" : running ? "Codex is editing…" : "Run"}</button>
+          {jobId && running && <button className="min-h-11 rounded-xl border border-amber-300/40 px-5 py-3 text-sm font-semibold text-amber-100 hover:bg-amber-300/10 disabled:cursor-not-allowed disabled:opacity-40" disabled={!canCancel || status === "cancelling"} onClick={() => void cancelRun()}>{status === "cancelling" ? "Stopping tools…" : canCancel ? "Cancel run" : "Finishing write…"}</button>}</div>
         </div>
       </section>
 
+      <div className="grid gap-5 lg:grid-cols-2">
+        <section className="rounded-2xl border border-emerald-300/25 bg-[#111b2a] p-5 sm:p-6" aria-labelledby="save-skill-title">
+          <h2 id="save-skill-title" className="text-lg font-semibold">Save reusable skill</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-400">Save the edit, prompts, technique measurements, build sources and native comparison history under your own name for new footage.</p>
+          <label className="mt-4 block text-sm text-slate-300">Skill name
+            <input className={field} value={recipeName} maxLength={80} placeholder="Name this editing skill" disabled={saving || skillSaved}
+              onChange={(event) => { setRecipeName(event.target.value); window.sessionStorage.setItem("ai-editor-skill-name", event.target.value); }} />
+          </label>
+          <button className={`${button} mt-4`} disabled={running || saving || !result || !recipeName.trim() || skillSaved} onClick={() => void saveRecipe()}>{saving ? "Saving…" : skillSaved ? "Skill saved" : "Save skill"}</button>
+          <p className="mt-3 text-xs leading-5 text-slate-400" role="status">{skillSaved ? "Saved in your skills library." : result ? "The completed edit is ready to save. Saving is optional." : "Name it now. Save skill becomes available after Run completes successfully."}</p>
+        </section>
+        <section className="rounded-2xl border border-white/10 bg-[#111b2a] p-5 sm:p-6" aria-labelledby="saved-skills-title">
+          <div className="flex items-center justify-between gap-3"><h2 id="saved-skills-title" className="text-lg font-semibold">Saved skills</h2><span className="text-xs text-slate-400">{recipes.length}</span></div>
+          {recipes.length === 0 ? <p className="mt-4 text-sm leading-6 text-slate-400">No skills saved yet. Run an edit, name it, and click Save skill.</p> : <div className="mt-4 max-h-80 space-y-3 overflow-auto">
+            {recipes.map((recipe) => <article key={recipe.id} className={`rounded-xl border p-4 ${recipeId === recipe.id ? "border-emerald-300 bg-emerald-300/5" : "border-white/10 bg-[#0b1220]"}`}>
+              <h3 className="break-words text-sm font-semibold">{recipe.name}</h3>
+              <p className="mt-1 text-xs leading-5 text-slate-400">{recipe.effects.length} techniques · {recipe.effects.join(", ")}</p>
+              <button className={`${button} mt-3`} disabled={running} onClick={() => selectSkill(recipe)}>{recipeId === recipe.id ? "Selected for reuse" : "Use skill"}</button>
+            </article>)}
+          </div>}
+        </section>
+      </div>
+
       {(jobId || transcript.length > 0) && <section className="rounded-2xl border border-white/10 bg-[#111b2a] p-5 sm:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">Codex conversation</h2><p className="mt-1 text-xs text-slate-400">{running ? "Live · analyzing and editing" : status === "complete" ? "Complete" : "Stopped"}</p></div><button className="text-xs font-medium text-emerald-300" onClick={() => setRawTranscript((value) => !value)}>{rawTranscript ? "Readable view" : "Raw transcript"}</button></div>
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">Codex conversation</h2><p className="mt-1 text-xs text-slate-400">{status === "cancelling" ? "Stopping tools…" : running ? "Live · analyzing and editing" : status === "complete" ? "Complete" : status === "cancelled" ? "Cancelled" : "Stopped"}</p></div><button className="text-xs font-medium text-emerald-300" onClick={() => setRawTranscript((value) => !value)}>{rawTranscript ? "Readable view" : "Raw transcript"}</button></div>
         <p className="mt-4 rounded-lg bg-[#0b1220] p-3 text-xs text-slate-300">You: {prompt}</p>
         <div className="mt-3 max-h-96 overflow-auto rounded-xl border border-white/10 bg-[#080c14] p-4" role="log" aria-live="polite"><pre className="whitespace-pre-wrap break-all font-mono text-xs leading-5 text-slate-300">{transcript.map((line) => rawTranscript ? line : transcriptLine(line)).join("\n\n") || "Waiting for Codex…"}</pre><div ref={transcriptEnd} /></div>
       </section>}
@@ -237,11 +301,12 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
       {result && <section className="rounded-2xl border border-emerald-300/25 bg-[#111b2a] p-5 sm:p-6">
         <h2 className="text-xl font-semibold">Edit written to {result.projectName}</h2>
         <p className="mt-2 text-sm text-slate-300">Detected techniques: {result.applied.join(", ")}.</p>
-        <p className="mt-2 text-xs text-slate-400">Tools used: {result.toolsUsed.join(", ") || "CapCut CLI"}. Open CapCut to review the visual result.</p>
+        {result.verified && <p className="mt-2 text-sm text-emerald-300">Native comparison passed after {result.iterations} {result.iterations === 1 ? "iteration" : "iterations"} · {result.model} · {result.access}</p>}
+        <p className="mt-2 text-xs text-slate-400">Tools used: {result.toolsUsed.join(", ") || "CapCut CLI"}. {result.verified ? "Native text, keyframes, effects and compounds remain editable." : "Open CapCut to review this earlier edit."}</p>
         {result.notes && <p className="mt-2 text-xs text-slate-400">{result.notes}</p>}
         <div className="mt-5 flex flex-wrap gap-3"><button className={button} onClick={() => void openProject()}>Open project in CapCut</button></div>
-        <div className="mt-5 border-t border-white/10 pt-5"><h3 className="text-sm font-semibold">Save the whole edit as one recipe</h3><div className="mt-3 flex flex-col gap-3 sm:flex-row"><input className={`${field} sm:mt-0`} value={recipeName} maxLength={80} onChange={(event) => setRecipeName(event.target.value)} aria-label="Recipe name" /><button className={button} disabled={saved || !recipeName.trim()} onClick={() => void saveRecipe()}>{saved ? "Saved" : "Save recipe"}</button></div></div>
         <p className="mt-4 break-all text-xs text-slate-500">Project backup: {result.backup}</p>
+        {result.evidencePath && <p className="mt-2 break-all text-xs text-slate-500">Native comparison evidence: {result.evidencePath}</p>}
       </section>}
     </div>
   </main>;

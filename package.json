@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --experimental-strip-types --test scripts/merge-clip-edit.test.mjs scripts/cancellable-process.test.mjs scripts/edit-skill-store.test.mjs"
   },
   "dependencies": {
     "next": "16.4.3",
