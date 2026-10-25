@@ -1,0 +1,17 @@
+{
+  "name": "ai-video-editor-toolchain",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.32.1",
+  "dependencies": {
+    "@remotion/cli": "4.0.538",
+    "@remotion/player": "4.0.538",
+    "hyperframes": "0.8.193",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "remotion": "4.0.538"
+  },
+  "devDependencies": {
+    "capcut-cli": "0.31.1"
+  }
+}
