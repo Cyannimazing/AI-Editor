@@ -1,0 +1,13 @@
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { platformPaths } from '../src/server/platform/runtime.mjs';
+import { findStoreSeed, initDraft, seedDraftSkeleton } from '../toolchain/node_modules/capcut-cli/dist/factory.js';
+const root = process.cwd(), projects = join(root, '.local-tools', 'projects');
+const donor = findStoreSeed(platformPaths().drafts);
+if (!donor) throw new Error('Create and save an empty project in CapCut first. Its installed version supplies a compatible project format.');
+const templates = join(root, '.local-tools', 'templates'); await mkdir(templates, { recursive: true });
+const template = await mkdtemp(join(templates, 'native-'));
+const { draft } = seedDraftSkeleton(donor.draft, { id: '', name: '', canvas: { width: 1920, height: 1080, ratio: '16:9' }, fps: 30, nowMs: Date.now(), materialKeys: [] });
+await writeFile(join(template, 'draft_content.json'), JSON.stringify(draft));
+const result = initDraft({ name: process.argv[2], draftsDir: projects, templateDir: template, seed: 'off' });
+console.log(JSON.stringify({ path: result.draftPath }));

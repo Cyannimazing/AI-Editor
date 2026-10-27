@@ -4,8 +4,11 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.32.1",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@remotion/cli": "4.0.538",
     "@remotion/player": "4.0.538",
+    "fontkit": "2.0.4",
+    "gsap": "3.14.2",
     "hyperframes": "0.8.193",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -13,5 +16,13 @@
   },
   "devDependencies": {
     "capcut-cli": "0.31.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "zod@4.5.4": "4.6.7"
+    },
+    "patchedDependencies": {
+      "hyperframes@0.8.193": "patches/hyperframes@0.8.193.patch"
+    }
   }
 }

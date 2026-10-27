@@ -3,11 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "node scripts/prepare-toolchain.mjs && next dev --hostname 127.0.0.1 --port 3000",
+    "build": "node scripts/prepare-toolchain.mjs && next build",
+    "start": "node scripts/prepare-toolchain.mjs && next start --hostname 127.0.0.1 --port 3000",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test scripts/merge-clip-edit.test.mjs scripts/cancellable-process.test.mjs scripts/edit-skill-store.test.mjs"
+    "tools:inspect": "node scripts/inspect-editing-tools.mjs",
+    "test": "node --experimental-strip-types --test scripts/merge-clip-edit.test.mjs scripts/cancellable-process.test.mjs scripts/edit-skill-store.test.mjs scripts/security-core.test.mjs scripts/controlled-plan.test.mjs scripts/reference-inputs.test.mjs scripts/ai-context.test.mjs scripts/capcut-plugin.test.mjs scripts/preview-plan.test.mjs scripts/professional-workflow.test.mjs scripts/edit-progress.test.mjs scripts/codex-transport.test.mjs scripts/motion-comparison.test.mjs scripts/native-text.test.mjs scripts/picture-framing.test.mjs scripts/local-editing-mcp.test.mjs scripts/audio-editing.test.mjs scripts/setup-platform.test.mjs",
+    "test:motion": "node scripts/test-motion-analysis.mjs",
+    "setup:motion": "node scripts/setup-motion-analysis.mjs"
   },
   "dependencies": {
     "next": "16.4.3",
@@ -24,5 +27,13 @@
     "tailwindcss": "^4",
     "typescript": "^5"
   },
-  "packageManager": "pnpm@10.32.1"
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "pnpm": {
+    "overrides": {
+      "zod@4.5.4": "4.6.7"
+    }
+  }
 }

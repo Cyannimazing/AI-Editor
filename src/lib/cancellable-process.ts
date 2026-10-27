@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { processEventLine } from './process-events.mjs';
 
 export async function runCancellableProcess(command: string, args: string[], options: {
   cwd: string;
@@ -6,10 +7,11 @@ export async function runCancellableProcess(command: string, args: string[], opt
   signal?: AbortSignal;
   timeoutMs: number;
   onLine: (line: string) => void;
+  env?: NodeJS.ProcessEnv;
 }) {
   options.signal?.throwIfAborted();
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, { cwd: options.cwd, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd: options.cwd, windowsHide: true, detached: process.platform !== "win32", env: options.env, stdio: ["pipe", "pipe", "pipe"] });
     let timedOut = false;
     let stopping = false;
     const stop = () => {
@@ -19,14 +21,25 @@ export async function runCancellableProcess(command: string, args: string[], opt
         execFile("taskkill", ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true }, (error) => {
           if (error && child.exitCode === null) child.kill();
         });
-      } else child.kill("SIGKILL");
+      } else if (child.pid) { try { process.kill(-child.pid, "SIGKILL"); } catch { child.kill("SIGKILL"); } }
     };
     const buffers = { stdout: "", stderr: "" };
+    const discarding = { stdout: false, stderr: false };
     const collect = (stream: "stdout" | "stderr", chunk: Buffer) => {
-      buffers[stream] += chunk.toString("utf8");
+      let incoming = chunk.toString('utf8');
+      if (discarding[stream]) {
+        const end = incoming.indexOf('\n');
+        if (end < 0) return;
+        incoming = incoming.slice(end + 1); discarding[stream] = false;
+      }
+      buffers[stream] += incoming;
       const lines = buffers[stream].split(/\r?\n/);
       buffers[stream] = lines.pop() ?? "";
-      for (const line of lines) if (line.trim()) options.onLine(line);
+      for (const line of lines) if (line.trim()) options.onLine(processEventLine(line));
+      if (buffers[stream].length > 16_000_000) {
+        buffers[stream] = ''; discarding[stream] = true;
+        options.onLine(JSON.stringify({ type: 'warning', message: 'A large media event was omitted from text diagnostics.' }));
+      }
     };
     child.stdout.on("data", (chunk: Buffer) => collect("stdout", chunk));
     child.stderr.on("data", (chunk: Buffer) => collect("stderr", chunk));
@@ -40,7 +53,7 @@ export async function runCancellableProcess(command: string, args: string[], opt
     child.once("error", (error) => { cleanup(); reject(error); });
     child.once("close", (code) => {
       cleanup();
-      for (const line of Object.values(buffers)) if (line.trim()) options.onLine(line);
+      for (const [stream, line] of Object.entries(buffers)) if (!discarding[stream as 'stdout' | 'stderr'] && line.trim()) options.onLine(processEventLine(line));
       if (options.signal?.aborted) reject(options.signal.reason ?? new DOMException("Run cancelled.", "AbortError"));
       else if (timedOut) reject(new Error("The process exceeded its time limit and was stopped."));
       else if (code === 0) resolve();

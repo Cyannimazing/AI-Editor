@@ -1,3 +1,5 @@
+import { endpoint } from "@/server/security/http";
+import { mediaTool } from "@/server/platform/runtime.mjs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, stat } from "node:fs/promises";
@@ -7,9 +9,9 @@ import { resolveTimelineClip } from "@/lib/keyframe-helper";
 
 const run = promisify(execFile);
 
-export async function GET(request: Request) {
+export const GET = endpoint(async (request: Request) => {
   const url = new URL(request.url);
-  if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) return new Response(null, { status: 403 });
+
   try {
     const clip = await resolveTimelineClip(url.searchParams.get("projectId") ?? "", url.searchParams.get("clipId") ?? "");
     const sourceStart = (clip.segment.source_timerange?.start ?? 0) / 1_000_000;
@@ -21,7 +23,7 @@ export async function GET(request: Request) {
     try { data = await readFile(path); }
     catch {
       await mkdir(folder, { recursive: true });
-      await run(join(process.cwd(), ".local-tools", "bin", "ffmpeg.exe"), ["-hide_banner", "-loglevel", "error", "-y",
+      await run(mediaTool("ffmpeg"), ["-hide_banner", "-loglevel", "error", "-y",
         "-ss", String(sourceStart), "-i", clip.mediaPath, "-frames:v", "1", "-vf", "scale=160:-2,format=rgb24", path],
       { timeout: 20_000, maxBuffer: 500_000 });
       data = await readFile(path);
@@ -30,4 +32,4 @@ export async function GET(request: Request) {
   } catch {
     return new Response(null, { status: 404 });
   }
-}
+});

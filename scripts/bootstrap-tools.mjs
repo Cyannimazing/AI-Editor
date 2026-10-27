@@ -1,9 +1,11 @@
+import { findExecutable } from '../src/server/platform/runtime.mjs';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createReadStream, existsSync } from 'node:fs';
 import { copyFile, mkdir, open, readdir, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setupFingerprint } from '../src/server/setup/requirements.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const local = join(root, '.local-tools');
@@ -13,6 +15,7 @@ const ffmpeg = join(bin, 'ffmpeg.exe');
 const ffprobe = join(bin, 'ffprobe.exe');
 const release = 'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip';
 const archive = join(local, 'ffmpeg-9.0.2-essentials_build.zip');
+const expectedFfmpegSha256 = '60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba';
 const toolchain = join(root, 'toolchain');
 
 async function status(stage, progress, detail, error = null) {
@@ -48,18 +51,22 @@ async function fileHash(path) {
 }
 
 async function downloadFfmpeg() {
-  if (existsSync(ffmpeg) && existsSync(ffprobe)) return;
-  if (process.platform !== 'win32') throw new Error('The automatic FFmpeg installer currently supports Windows only.');
+  if (findExecutable('ffmpeg') && findExecutable('ffprobe')) { await run(findExecutable('ffmpeg'), ['-version']); await run(findExecutable('ffprobe'), ['-version']); return; }
+  if (process.platform === 'darwin') {
+    const brew = findExecutable('brew');
+    if (!brew) throw new Error('Install Homebrew from brew.sh to enable automatic FFmpeg setup, then retry.');
+    await run(brew, ['install', 'ffmpeg']);
+    if (!findExecutable('ffmpeg') || !findExecutable('ffprobe')) throw new Error('FFmpeg installation was not detected.');
+    return;
+  }
+  if (process.platform !== 'win32') throw new Error('Only Windows and macOS are supported.');
 
   await status('download', 4, 'Checking FFmpeg package');
-  const checksumResponse = await fetch(release + '.sha256');
-  if (!checksumResponse.ok) throw new Error('Could not retrieve the FFmpeg checksum.');
-  const expected = (await checksumResponse.text()).match(/[a-f0-9]{64}/i)?.[0]?.toLowerCase();
-  if (!expected) throw new Error('FFmpeg checksum was not recognized.');
+  const expected = expectedFfmpegSha256;
 
   let verified = existsSync(archive) && (await fileHash(archive)) === expected;
   if (!verified) {
-    const response = await fetch(release);
+    const response = await fetch(release, { signal: AbortSignal.timeout(300000) });
     if (!response.ok || !response.body) throw new Error('FFmpeg download failed (HTTP ' + response.status + ').');
     const total = Number(response.headers.get('content-length') || 0);
     const temporary = archive + '.partial';
@@ -73,6 +80,7 @@ async function downloadFfmpeg() {
         if (done) break;
         await target.write(value);
         received += value.byteLength;
+        if (received > 300 * 1024 * 1024) { await reader.cancel(); throw new Error('FFmpeg download exceeds its expected size budget.'); }
         const percent = total ? Math.min(69, 5 + Math.floor(received / total * 64)) : 5;
         if (percent > lastPercent) {
           lastPercent = percent;
@@ -108,20 +116,27 @@ async function installMotionTools() {
   const hyperframes = join(toolchain, 'node_modules', 'hyperframes', 'package.json');
   const remotionCli = join(toolchain, 'node_modules', '@remotion', 'cli', 'remotion-cli.js');
   const capcutCli = join(toolchain, 'node_modules', 'capcut-cli', 'dist', 'index.js');
-  if ([remotion, hyperframes, remotionCli, capcutCli].every(existsSync)) return;
+  const gsap = join(toolchain, 'node_modules', 'gsap', 'dist', 'gsap.min.js');
+  const fontkit = join(toolchain, 'node_modules', 'fontkit', 'package.json');
+  const mcp = join(toolchain, 'node_modules', '@modelcontextprotocol', 'sdk', 'package.json');
   await status('motion', 82, 'Installing Remotion, HyperFrames and CapCut CLI with pnpm');
-  await run(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm',
-    ['install', '--no-frozen-lockfile', '--ignore-workspace'], toolchain);
-  if (![remotion, hyperframes, remotionCli, capcutCli].every(existsSync)) {
+  await run(process.execPath, [join(root, 'scripts/prepare-toolchain.mjs')]);
+  if (![remotion, hyperframes, remotionCli, capcutCli, gsap, fontkit, mcp].every(existsSync)) {
     throw new Error('The motion tool packages were not installed.');
   }
 }
 
 try {
+  if (Number(process.versions.node.split('.')[0]) !== 24) throw new Error('Use Node.js 24 LTS for this tested app build, then reopen AI-Editor.');
   await status('starting', 2, 'Preparing the local editing workspace');
   await downloadFfmpeg();
   await status('motion', 80, 'Checking motion and graphics tools');
   await installMotionTools();
+  await status('motion', 92, 'Preparing local frame and motion measurements');
+  await run(process.execPath, [join(root, 'scripts', 'setup-motion-analysis.mjs')]);
+  await status('browser', 96, 'Preparing the background motion-preview browser');
+  await run(process.execPath, [join(root, 'scripts', 'setup-preview-browser.mjs')]);
+  await writeFile(join(local, 'setup-receipt.json'), JSON.stringify({ fingerprint: await setupFingerprint(root), platform: process.platform, arch: process.arch, completedAt: new Date().toISOString() }));
   await status('ready', 100, 'Video tools are ready');
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);

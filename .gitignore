@@ -44,4 +44,5 @@ next-env.d.ts
 
 /.local-tools/
 /toolchain/node_modules/
+/toolchain/.patch-work/
 Assets

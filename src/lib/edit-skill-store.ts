@@ -22,7 +22,7 @@ export async function snapshotEditSkill(input: {
   const manifest = JSON.parse(manifestText) as { supported?: boolean };
   const sourcePath = plan.source?.path ?? plan.tracks?.[0]?.items?.[0]?.path;
   if (!sourcePath || !manifest.supported) throw new Error("The completed edit has no reusable plan.");
-  if (plan.workflowVersion === 2) {
+  if ((plan.workflowVersion ?? 1) >= 2) {
     const review = JSON.parse(await readFile(join(buildDirectory, "review.json"), "utf8")) as { matched?: boolean; nativeOutput?: string };
     if (!review.matched || !["capcut-preview", "capcut-export"].includes(review.nativeOutput ?? "")) throw new Error("Only a natively reviewed edit can be saved as a skill.");
   }
@@ -39,7 +39,7 @@ export async function snapshotEditSkill(input: {
     writeFile(skill.manifestPath, JSON.stringify(manifest, null, 2), "utf8"),
     writeFile(join(folder, "skill.json"), JSON.stringify(skill, null, 2), "utf8"),
   ]);
-  if (plan.workflowVersion === 2) {
+  if ((plan.workflowVersion ?? 1) >= 2) {
     const sources = (await readdir(buildDirectory)).filter((name) =>
       /^(workflow\.md|reference-analysis\.json|loop-history\.json|review\.json|native-edit\.(mjs|ts)|prompt-(build|review)-\d+\.txt)$/.test(name));
     await Promise.all(sources.map((name) => cp(join(buildDirectory, name), join(folder, name))));

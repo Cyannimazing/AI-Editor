@@ -1,0 +1,2 @@
+# Keep the dependency patch byte-for-byte stable on Windows and macOS.
+toolchain/patches/*.patch text eol=lf

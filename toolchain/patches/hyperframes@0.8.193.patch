@@ -1,0 +1,18 @@
+diff --git a/dist/chunk-2NERNYCJ.js b/dist/chunk-2NERNYCJ.js
+index 8294041a68ecf6e8a44a71dbe1b38315d2283c59..f83d039d71d2aa0024f465698a2bc7e1d73132df 100644
+--- a/dist/chunk-2NERNYCJ.js
++++ b/dist/chunk-2NERNYCJ.js
+@@ -213,7 +213,12 @@ async function chromeLaunchOutcome(executablePath, found, signal) {
+   const libraries = await chromeSharedLibOutcome(executablePath, found, signal);
+   if (!libraries.ok) return libraries;
+   try {
+-    const { stdout } = await runCancellableProcess(executablePath, ["--version"], {
++    // Windows Chrome treats --version as a normal browser launch. Read its
++    // executable metadata instead; the actual render still verifies headless launch.
++    const windows = process.platform === "win32";
++    const { stdout } = await runCancellableProcess(windows ? "powershell.exe" : executablePath, windows
++      ? ["-NoProfile", "-NonInteractive", "-Command", `(Get-Item -LiteralPath '${executablePath.replaceAll("'", "''")}').VersionInfo.ProductVersion`]
++      : ["--version"], {
+       signal,
+       timeoutMs: FIRST_LAUNCH_TIMEOUT_MS,
+       maxBufferBytes: 64 * 1024

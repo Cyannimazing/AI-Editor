@@ -1,47 +1,133 @@
-# AI Video Editor
+# AI-Editor
 
-A local Next.js helper that edits a selected CapCut timeline clip or populates an empty project from raw footage and a reference video. GPT-6.1 Sol analyzes the reference, builds native editable layers, and loops through CapCut playback comparisons and corrections before replacing the selected project's draft. The CLI conversation streams into the app.
+A local editing workspace powered by the user's signed-in ChatGPT Codex CLI. It prepares a separate CapCut candidate and requires user approval before applying a verified edit.
 
-## Start
+**Development status:** local MCP construction/readback and protected-file denial have been exercised on Windows. This is not a finished release. Automatic native verification and real macOS acceptance remain open. See [the audit addendum](docs/audit-remediation.md) and [MCP investigation](docs/local-mcp-editing-research.md).
 
-```powershell
-pnpm install
+## Set up the application
+
+This is a source checkout running on your computer, not a packaged Windows installer or Mac app. Use the steps below on Windows or macOS. Windows has been exercised locally; Mac path/setup checks are automated, but a real MacBook editing trial is still required.
+
+### 1. Install the prerequisites once
+
+| Requirement | Windows | macOS |
+| --- | --- | --- |
+| Node.js | Install **Node.js 24.x** from [Node.js](https://nodejs.org/en/download). | Install **Node.js 24.x** for your Mac: ARM64 for Apple Silicon, x64 for Intel. |
+| Codex | Install the official [Codex app/CLI](https://developers.openai.com/codex/quickstart), including its `codex-code-mode-host`. | Same requirement. System and per-user Codex app locations are checked. |
+| CapCut desktop | Install [CapCut desktop](https://www.capcut.com/tools/desktop-video-editor), open it once, and save a test project. | Same requirement. The default application location is `/Applications/CapCut.app`. |
+| Local media tools | Install [Python 3.13](https://www.python.org/downloads/) (3.10–3.13 supported); enable its PATH option. FFmpeg installs automatically if missing. | Install [Homebrew](https://brew.sh/) if compatible Python and FFmpeg are not already available. Setup uses it to install missing FFmpeg/Python 3.13. |
+| Downloading this code | Install Git, or download and extract the repository ZIP. | Same requirement. |
+
+Reopen your terminal after installing prerequisites. An existing Google Chrome installation can supply the **headless** preview browser. Otherwise setup obtains the browser managed by the pinned HyperFrames release. Preview rendering does not require a visible Chrome window.
+
+### 2. Download and start
+
+Run these commands in PowerShell on Windows, or Terminal on macOS:
+
+```sh
+git clone https://github.com/Cyannimazing/AI-Editor.git
+cd AI-Editor
+npm install --global pnpm@10.32.1
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-Open `http://localhost:3000`. First launch installs the local FFmpeg, Remotion, and HyperFrames toolchain. Sign in to Codex CLI with your ChatGPT account (`codex login`); this workflow does not require an OpenAI API key. Groq remains optional.
+If you downloaded a ZIP, open a terminal inside its extracted folder and start with the `npm install` command. If you already have this repository, use its existing folder. Keep the terminal running while using the app.
 
-## Edit a video
+Open [localhost:3000](http://localhost:3000). The server listens only on this computer (`127.0.0.1`). If port 3000 is occupied, stop the other app using it and retry. To stop AI-Editor, use **Stop** for any active editing job, then press **Ctrl+C** in the terminal.
 
-1. Save your project in CapCut. Leave the desktop available for the native review loop.
-2. Select the project in the app. For a populated timeline, choose a video clip using its thumbnail, filename, track, and timeline position. For an empty project, attach raw footage. Add a reference video or image.
-3. Describe what to copy or change, then click **Run**. The app closes CapCut and copies the project into an isolated review candidate. The CLI inspects the whole reference, including consecutive frames for short references, and records technique measurements. It uses Remotion for motion design, HyperFrames for captions/graphics, and FFmpeg for frames, cuts and sound mixes. Final text, motion and effects stay native and editable.
-4. Each iteration builds with CapCut closed, opens the candidate for native review, compares the entire edit and closes CapCut before another revision. The loop checks text proportions, camera zooms, easing, entrance smears, sharp settled graphics, real effects and audio where present. The CLI needs working local computer-use tools or a native export adapter to perform this review; Full Access alone does not supply a native renderer. Proxy renders and draft lint cannot pass the comparison gate. If native review is unavailable or the match remains incomplete, your original project is not replaced and the candidate/feedback are retained.
-5. After every technique passes, the app backs up the selected project, commits the verified candidate with CapCut closed and reopens the final project. **Cancel run** stops active analysis/tools before the final write. That short write finishes without interruption once it starts.
-6. Enter your **Skill name** and click **Save skill**. Saving snapshots the plan, native manifest, workflow, reference analysis, build/review prompts and comparison history, and retains the reference, evidence and reusable build-asset locations. **Use skill** starts from those settings with new footage; footage-dependent assets are regenerated and the current prompt can override the recipe. Saving is explicit.
+### 3. Sign in and let setup finish
 
-The app launches Codex CLI with `--model gpt-6.1-sol --dangerously-bypass-approvals-and-sandbox`, high reasoning and local shell tools. This is Full Access with network access and no approval prompts. Existing CLI configuration remains available for installed skills and relevant native computer-use tools. Authentication must use the signed-in ChatGPT account. The HTTP API remains restricted to localhost.
+| Connection | Needed? | What to do |
+| --- | --- | --- |
+| ChatGPT / Codex | **Required** for AI editing. Uses your account and its usage limits. | Choose **Sign in with ChatGPT** in the app and complete the official sign-in page. An existing Codex sign-in is reused. API keys are not supported. |
+| Local editing MCP | **No additional sign-in.** | Nothing to configure. AI-Editor starts its private MCP tools for each editing role. |
+| Official CapCut MCP | **Optional.** Adds official material discovery. | Install the compatible official CapCut plugin in Codex if you want this connection, then use **Sign in to CapCut MCP** under **Official CapCut MCP** in AI-Editor. Complete consent on CapCut's page and return to the app. Local editing works without this connection. |
 
-For an existing timeline, Run updates only the selected interval, preserving unrelated segments, shared materials, track settings, canvas, frame rate and project duration. Source splits, unprocessed freeze stills and native compounds are supported. Constant speed and trims are normalized for analysis; speed curves are refused. Source-scoped native effects or compound effects isolate processing from unrelated layers. Generated video replacements containing baked text/effects are rejected. Static graphic assets and audio mixes are supported.
+On startup, the app prepares the pinned Node editing packages before loading the workspace. After ChatGPT sign-in, it automatically checks/prepares FFmpeg, the private Python measurement environment, the background preview browser, and AI tool instructions. The setup screen shows progress and any prerequisite that still needs attention. This first run needs internet and may take several minutes; it is not instant.
 
-The default loop budget is six build/review iterations. Set `AI_EDITOR_MAX_ITERATIONS` to an integer from 1–12 to change it. Short references up to 12 seconds receive consecutive frame extraction at up to 60fps; longer references receive an overview, with the CLI required to inspect dense transition windows. References are limited to 100 MB and ten minutes; raw uploads to 200 MB. Each job retains exact prompts, analysis, scripts, manifests, iteration feedback and native preview evidence under `.local-tools/`.
+Later launches reuse checked tools. A changed tool version, platform or CPU architecture triggers fresh checks. Use **Resume tool setup** after fixing a failed prerequisite; an interrupted setup can continue using downloaded packages. Never copy `node_modules`, `toolchain/node_modules` or `.local-tools` from Windows to Mac (or between Intel and Apple Silicon). Clone/extract the source and install on the destination computer.
 
-The detailed editing rules and calibration lessons from the manual workflow live in [docs/reference-editing-workflow.md](docs/reference-editing-workflow.md). They include native scale axes, font-size calibration, real effect resources, correct compound references, and explicit frame-aligned phases when native animation clocks fail. Measurements are derived from the current reference; the previous clip's words, timings and graphics are not hardcoded.
+Only compatible packages from the lockfiles are installed; package lifecycle scripts are disabled for the editing toolchain. Windows FFmpeg downloads use a fixed SHA-256 checksum. Python setup uses a private `.local-tools/motion-python` environment and pinned, hash-verified OpenCV/NumPy wheels, without source builds or changes to system Python packages. Homebrew manages its own FFmpeg/Python packages. `pnpm setup:motion` can retry just frame-measurement setup.
 
-## Layout
+### 4. Try an edit
 
-- `src/app/keyframe-helper.tsx`: raw/reference workflow and live Codex transcript.
-- `src/lib/native-capcut.ts`: source preparation, isolated candidate, backup, and verified draft commit.
-- `src/lib/reference-edit-loop.ts`: build/review iterations, exact saved prompts, native evidence gate and mismatch feedback.
-- `src/lib/native-edit-validation.ts`: selected-interval, unrelated-content, native asset and comparison validation.
-- `src/lib/reference-media.ts`: timed frame index, contact sheets and reference audio.
-- `scripts/capcut-session.mjs`: close/wait/open protocol; never force-kills a saving editor.
-- `scripts/capcut-draft.mjs`: active timeline resolution, isolated review identity, draft fingerprints and native commit.
-- `scripts/native-motion-tools.mjs`: axis-scale conversion, coordinate/font calibration hints and fixed frame-phase segments.
-- `scripts/merge-clip-edit.mjs`: retained legacy compile/merge helper.
-- `src/lib/edit-jobs.ts`: job progress and explicitly saved whole-edit recipes.
-- `src/lib/cancellable-process.ts`: streams child processes and stops their Windows process tree on cancellation.
-- `src/lib/edit-skill-store.ts`: named skill snapshots containing completed edit settings.
-- `src/lib/reference-analysis.ts`: ChatGPT-signed-in Codex CLI launch and transcript capture.
-- `toolchain/`: CapCut CLI, Remotion, HyperFrames, and their installed dependencies.
-- `.local-tools/`: downloaded binaries, job assets, transcripts, and backups. This folder is local and Git-ignored.
+1. Wait for setup to finish, then choose **Open workspace**.
+2. Select a saved CapCut project, or create a disposable test project and add footage.
+3. Enter your editing instructions. A video, image or public-link reference is optional.
+4. Run the edit. The app builds a candidate, checks it and requests corrections when needed.
+5. Review the app preview and open the **editable test copy** in CapCut to inspect motion, sound and native controls.
+
+Use a test project for the first run. Automatic native CapCut verification is still unfinished, so a successful local preview does not authorize replacing your original project. The app keeps that gate explicit.
+
+### Common setup problems
+
+- **Codex or its tool host was not found:** update/install the official Codex distribution. The app needs both executables, not only account credentials. If your installation is custom, add the directory containing both native executables to PATH, restart the terminal, then restart the app.
+- **Python is missing or incompatible:** use Python 3.10–3.13. On Mac, setup checks both Intel and Apple Silicon Homebrew paths, including versioned Python installations. Apple's system Python may be too old.
+- **Homebrew was not found:** install it from its official site, or install compatible FFmpeg and Python yourself and make them available on PATH. Then resume setup.
+- **Downloads or browser checks failed:** restore internet access, check the reported error, and resume setup. Do not bypass checksum failures. `AI_EDITOR_BROWSER_PATH` can point to a compatible Chrome executable in a custom location.
+- **CapCut/project not detected:** open CapCut once and save a project. Custom locations can be supplied with `AI_EDITOR_CAPCUT_PATH` and `AI_EDITOR_DRAFTS_ROOT` before starting the app. On macOS the application override points to the `.app` bundle; on Windows it points to `CapCut.exe`.
+- **Mac asks for permission to quit/open CapCut:** review the macOS Automation prompt for the app/terminal you are using. Desktop automation permissions are separate from ChatGPT and MCP sign-in. Do not disable Gatekeeper or macOS security protections.
+
+For a production-mode local server, use `pnpm build` followed by `pnpm start`. Both startup modes prepare the editing packages; neither makes automatic native verification complete.
+
+## Local and optional online features
+
+The default uses the app's CLI, local media tools and your existing Codex account. AI reasoning uses that account's allowance; instructions and selected reference/preview frames are sent to Codex. Local rendering does not mean offline AI inference.
+
+The app starts a private local stdio MCP connection per editing role. Codex can inspect individual reference frames, discover installed command contracts and no-cost catalog resources, test curves, build native candidate layers and read back the actual saved controls. Only the lead can write the candidate; reviewers are read-only. The official Codex app/CLI must include its bundled `codex-code-mode-host`. No separate CapCut MCP account or paid backend is required.
+
+CapCut sign-in is optional for local draft editing. Its official plugin offers online templates, shared web drafts, captions and media generation. These are plugin capabilities, not completed app integrations. Cloud workflows may upload media. Paid services, credit purchases and paid generation are disabled. Connecting an account does not enable uploads or spending.
+
+For supported native effects, the connected app automatically looks up official resources and uses the installed local CapCut builder before translating its result into an editable desktop candidate. No separate effect search is required from the user. Actual named controls come from matching installed effect bundles; native output verification remains a separate release gate.
+
+GSAP/HyperFrames, appropriately licensed Remotion and FFmpeg can create local graphics and animation through CLI jobs. Photorealistic image/video generation requires a separately supported model/runtime; no provider is silently enabled.
+
+## Editing workflow
+
+1. Select a saved CapCut project or create a disposable test project in the app.
+2. Choose a timeline clip or attach raw footage to an empty project. Enter instructions and optionally a reference.
+3. The controller checks account/model availability, isolation, tools, source paths and an exclusive lock.
+4. The editor changes an isolated candidate. Structural checks, an approximate design preview and independent reviewer/manager findings guide corrections.
+   References transfer techniques to your footage; they do not clone another scene. New raw-footage projects fill the picture before animation. You can focus a run with “Keyframes only”; other runs retain effect and asset tools.
+5. Native verification must inspect actual CapCut output and editable controls. Until that adapter is validated, approval and application remain blocked. A proxy render cannot pass this gate.
+6. The user approves the exact verified revision. Fresh digest checks, a complete backup and a journal protect the commit. Failed validation restores the whole original directory. Unresolved crash journals block later writes.
+
+Defaults: one build plus three corrections, 30-minute deadline, standard model speed and at most one high-reasoning escalation. Stop cancels active tools. Interrupted jobs retain files and are marked interrupted; full automatic continuation is unfinished.
+
+Saved skills are internal reusable editing recipes, not portable CapCut presets. Saving requires a completed reviewed job and the user's Save action.
+
+## Code map
+
+| Location | Responsibility |
+| --- | --- |
+| `ai/` | Role contexts, contracts and workflow references |
+| `src/app/api/` | Thin authenticated HTTP handlers |
+| `src/server/security/` | Local sessions, origins, uploads and paths |
+| `src/server/codex/` | Account, models, roles and isolation |
+| `src/server/setup/` | Tool setup and capability status |
+| `src/server/platform/` | Windows/macOS paths and tools |
+| `src/server/editing/` | Plan, reviews, locks and transactions |
+| `src/server/capcut/` | Native verification capability gate |
+| `src/lib/native-capcut.ts` | Source preparation and approved commit |
+| `src/lib/reference-edit-loop.ts` | Bounded editing/review controller |
+| `scripts/capcut-*.mjs` | Trusted project/application operations |
+
+`AI_EDITOR_CAPCUT_PATH` and `AI_EDITOR_DRAFTS_ROOT` override discovery without bypassing validation. Assets, logs, downloads and journals live in Git-ignored `.local-tools/`. Complete project backups are retained in `.ai-editor-backups` beside the original project.
+
+## Verification
+
+```sh
+pnpm test
+pnpm test:motion
+pnpm lint
+pnpm build
+```
+
+These checks include disposable security/setup fixtures and local MCP permission tests without invoking an AI model. Failed permission checks block editing. Unit/build checks do not establish native compatibility or acceptable resource use on an 8 GB MacBook. `scripts/check-worker-sandbox.mjs` is a legacy diagnostic for the earlier shell-sandbox design, not the current MCP readiness check.
+
+For an explicit application trial using your Codex allowance, `node scripts/reference-transfer-smoke.mjs <local-reference.mp4>` creates a disposable project with unrelated footage and submits a motion-transfer request through the normal app API. It retains the job ID under `.local-tools/smoke/`; it does not touch a personal project or open the desktop. See the audit for completed trials and their actual evidence limits.
+
+For a disposable sound-design trial, run `node scripts/audio-edit-smoke.mjs` while the app is running. The v5 plan lets the editor preserve source sound or add original local procedural SFX/simple tonal music where appropriate. Generated WAVs and synthesis recipes stay local; native audio tracks retain timing and volume keyframes. The motion preview mixes the saved controls and checks clipping/silence. This feature does not install a song, voice or speech-recognition model, and does not establish native playback or listening quality.
+
+Invalid editing-tool inputs return actionable repair details and bounded retries. A recovered tool call is shown separately from final quality approval. Chrome is used headlessly for motion previews. The pinned HyperFrames patch in `toolchain/patches/` reads Windows executable version metadata instead of launching `chrome.exe --version`; actual rendering still checks that the background browser works. The patch is retained in the toolchain lockfile for fresh Windows/macOS setup.

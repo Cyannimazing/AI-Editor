@@ -121,7 +121,9 @@ export function mergeClipEdit(original, generated, clipId) {
       if (ids.has(segment.id)) throw new Error('A generated segment ID conflicts with the existing project.');
       ids.add(segment.id);
       const range = segment.target_timerange;
-      if (['effect', 'filter'].includes(added.type) || range.start < 0 || range.duration <= 0 || range.start >= duration || range.start + range.duration > duration + 50_000) {
+      const editedIds = new Set([clipId, ...generated.tracks.slice(1).flatMap(track => track.segments.map(segment => segment.id))]);
+      const scopedEffect = ['effect', 'filter'].includes(added.type) && Object.values(generated.materials).some(items => Array.isArray(items) && items.some(material => material.id === segment.material_id && material.apply_target_type === 0 && editedIds.has(material.bind_segment_id)));
+      if ((['effect', 'filter'].includes(added.type) && !scopedEffect) || range.start < 0 || range.duration <= 0 || range.start >= duration || range.start + range.duration > duration + 50_000) {
         throw new Error('A generated layer falls outside the selected clip.');
       }
       range.duration = Math.min(range.duration, duration - range.start);

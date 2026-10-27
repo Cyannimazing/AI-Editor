@@ -1,5 +1,5 @@
-import { readFile, stat } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { readFile, stat, realpath } from "node:fs/promises";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 
 type Range = { start: number; duration: number };
@@ -15,6 +15,7 @@ export type NativeManifest = {
   effects: { id: string; technique: string; trackNames: string[]; segmentIds: string[]; method: string }[];
   toolsUsed: string[];
   limitations: string[];
+  verificationGaps?: string[];
   notes: string;
 };
 export type ReferenceAnalysis = {
@@ -120,7 +121,8 @@ export async function validateNativeCandidate(input: {
   for (const track of candidate.tracks.filter((item) => ["effect", "filter"].includes(item.type))) {
     for (const segment of track.segments.filter((item) => !originalSegmentIds.has(item.id))) {
       const material = candidateMaterials.get(segment.material_id);
-      if (!sourceOnMain || material?.apply_target_type !== 0) throw new Error("Isolate this effect inside a native compound; it would affect unrelated layers.");
+      const boundToSource = typeof material?.bind_segment_id === "string" && rootSegments.some(segment => segment.id === material.bind_segment_id && (sourceIds.has(segment.id) || !originalSegmentIds.has(segment.id)));
+      if ((!sourceOnMain && !boundToSource) || material?.apply_target_type !== 0 || (material.bind_segment_id && !boundToSource)) throw new Error("Isolate or bind this effect to the edited source; it would affect unrelated layers.");
     }
   }
   for (const draft of children) {
@@ -141,7 +143,14 @@ export async function validateNativeCandidate(input: {
           !input.sourcePaths.some((source) => resolve(source).toLowerCase() === path.toLowerCase())) {
           throw new Error("A generated video would bake the edit. Keep motion, words and effects as native controls; use only the supplied source footage.");
         }
+        if (item.extra_type_option === 2 && !draft.tracks.some(track => track.segments.some(segment => segment.material_id === item.id &&
+          segment.extra_material_refs?.some(id => draft.materials.drafts?.some(compound => compound.id === id && compound.type === "combination" && compound.draft)))))
+          throw new Error("A compound proxy must reference its editable native child draft.");
         await stat(path).catch(() => { throw new Error(`A native media/effect dependency is missing: ${path}`); });
+        const resolved = await realpath(path);
+        const roots = [await realpath(candidatePath), await realpath(dirname(input.sourcePaths[0]))];
+        if (!roots.some(root => isInside(root, resolved)) && !input.sourcePaths.some(source => resolve(source).toLowerCase() === resolved.toLowerCase()))
+          throw new Error("A new dependency is outside this candidate and its job assets.");
       }
     }
   }
