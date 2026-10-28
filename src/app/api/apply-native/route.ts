@@ -14,7 +14,12 @@ export const POST = endpoint(async request => {
   if (prompt.length > 8000) throw new Error("Keep instructions under 8,000 characters.");
   if (reference instanceof File && reference.size > 100 * 1024 * 1024) throw new Error("Reference must be 100 MB or smaller.");
   if (rawVideo instanceof File && rawVideo.size > 200 * 1024 * 1024) throw new Error("Footage must be 200 MB or smaller.");
+  const clipsText = form.get('clipIds');
+  if (clipsText !== null && (typeof clipsText !== 'string' || clipsText.length > 22000)) throw new Error('Invalid clip selection.');
+  const clipIds = clipsText === null ? undefined : JSON.parse(clipsText as string);
+  if (clipIds !== undefined && (!Array.isArray(clipIds) || clipIds.length > 100 || clipIds.some(id => typeof id !== 'string' || id.length > 200))) throw new Error('Invalid clip selection.');
   const id = await startEditJob({ projectId: String(form.get("projectId") ?? ""), clipId: String(form.get("clipId") ?? ""),
+    clipIds, editScope: String(form.get('editScope') ?? ''),
     rawVideo: rawVideo instanceof File ? rawVideo : null, reference: reference instanceof File ? reference : null,
     recipeId: String(form.get("recipeId") ?? ""), referenceUrl, prompt });
   return Response.json({ id }, { status: 202 });

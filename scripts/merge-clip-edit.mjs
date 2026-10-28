@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
-export function mergeClipEdit(original, generated, clipId) {
+export function mergeClipEdit(original, generated, clipId, { compositionEffectIds = [] } = {}) {
   const draft = structuredClone(original);
   const originalIds = new Set();
   const remappedIds = new Map();
@@ -122,7 +122,11 @@ export function mergeClipEdit(original, generated, clipId) {
       ids.add(segment.id);
       const range = segment.target_timerange;
       const editedIds = new Set([clipId, ...generated.tracks.slice(1).flatMap(track => track.segments.map(segment => segment.id))]);
-      const scopedEffect = ['effect', 'filter'].includes(added.type) && Object.values(generated.materials).some(items => Array.isArray(items) && items.some(material => material.id === segment.material_id && material.apply_target_type === 0 && editedIds.has(material.bind_segment_id)));
+      const scopedEffect = ['effect', 'filter'].includes(added.type) && Object.values(generated.materials).some(items => Array.isArray(items) && items.some(material => material.id === segment.material_id && (
+        material.apply_target_type === 0 && editedIds.has(material.bind_segment_id) ||
+        material.apply_target_type === 2 && !material.bind_segment_id && compositionEffectIds.includes(material.id) &&
+        !original.tracks.filter(t => t.type !== 'audio').flatMap(t => t.segments || []).some(s => s.id !== clipId &&
+          s.target_timerange.start < start + range.start + range.duration && s.target_timerange.start + s.target_timerange.duration > start + range.start))));
       if ((['effect', 'filter'].includes(added.type) && !scopedEffect) || range.start < 0 || range.duration <= 0 || range.start >= duration || range.start + range.duration > duration + 50_000) {
         throw new Error('A generated layer falls outside the selected clip.');
       }

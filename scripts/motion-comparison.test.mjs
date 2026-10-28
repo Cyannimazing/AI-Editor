@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { guardSourceMotion, motionCheckTimes, motionCurveReport, compareSourceMotion } from '../src/server/editing/motion-comparison.mjs';
+import { guardSourceMotion, motionCheckTimes, motionCurveReport, compareSourceMotion, plannedMotionDynamics } from '../src/server/editing/motion-comparison.mjs';
 import { motionPython } from '../src/server/editing/motion-runtime.mjs';
 import { sourceCoverage, includeMotionDefects, coverageDefects, feasibleFraming } from '../src/server/editing/motion-coverage.mjs';
 import { editingScope, assertEditingScope } from '../src/server/editing/edit-scope.mjs';
@@ -9,6 +9,26 @@ const source = (scale = 1) => ({ scale: 1, x: 0, y: 0, rotation: 0, opacity: 1, 
   keyframes: [{ property: 'scale', time: 0, value: scale, easing: 'linear' }, { property: 'scale', time: 0.2, value: 1, easing: 'linear' }] });
 const plan = value => ({ source: source(value), texts: [], overlays: [], effects: [] });
 const measurement = { samples: [{ time: 0, status: 'matched', directlyApplicable: true, transform: { scale: 0.78, x: 0.23, y: -0.03, rotation: 0 } }] };
+
+test('continuous zoom diagnostics distinguish constant travel from repeated easing stops and end holds', () => {
+  const p = plan(1);
+  p.source.keyframes = [0, 1, 2, 3].map((time, i) => ({ property: 'scale', time, value: 1 + Math.min(i, 2) * .1, easing: 'linear' }));
+  const linear = plannedMotionDynamics(p, { fps: 30, duration: 3 });
+  const scale = linear[0].curves.find(c => c.property === 'KFTypeScaleX');
+  assert.equal(scale.intervals[0].startRate, scale.intervals[0].endRate);
+  assert.equal(scale.intervals[2].kind, 'hold');
+  assert.deepEqual(scale.intervals[2].range, [2, 3]);
+  assert.equal(scale.stopCandidates.length, 0);
+  p.source.keyframes.forEach(k => k.easing = 'ease-in-out');
+  const eased = plannedMotionDynamics(p, { fps: 30, duration: 3 })[0].curves.find(c => c.property === 'KFTypeScaleX');
+  assert.ok(eased.stopCandidates.some(c => c.time === 1));
+  assert.ok(eased.intervals[0].midRate > eased.intervals[0].endRate * 3);
+  assert.equal(p.source.keyframes.length, 4, 'diagnostics never rewrite the editor plan');
+  p.source.keyframes = p.source.keyframes.slice(0, 2);
+  const tail = plannedMotionDynamics(p, { fps: 30, duration: 3 })[0].curves[0].intervals.at(-1);
+  assert.equal(tail.kind, 'hold');
+  assert.deepEqual(tail.range, [1, 3], 'native last-value retention is visible to reviewers');
+});
 
 test('a crop repair cannot regress measured motion or erase unrelated successful changes', () => {
   const previous = plan(1), proposed = plan(1.24);

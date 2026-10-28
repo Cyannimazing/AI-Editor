@@ -10,6 +10,8 @@ import { mediaTool } from '../src/server/platform/runtime.mjs';
 import { createLocalEditingSession } from '../src/server/editing/local-mcp.mjs';
 import { editingMcpArgs } from '../src/server/codex/editing-mcp-config.mjs';
 import { structuredPolicyArgs } from '../src/server/codex/structured-policy.mjs';
+import { directoryDigest } from '../src/server/editing/transaction.ts';
+import { fileDigest } from '../src/server/capcut/native-capture.mjs';
 
 test('MCP configuration preserves spaced Windows/macOS paths and grants write tools only to the editor', () => {
   for (const root of ['C:\\Users\\Test User\\Editor', '/Users/Test User/Editor']) {
@@ -76,14 +78,34 @@ test('real stdio MCP writes and reads native keyframes, rejects extra paths and 
   assert.equal(JSON.parse(recovered.content.at(-1).text).recovery.status, 'recovered');
   const result = await client.callTool({ name: 'apply_edit_plan', arguments: { planJson: JSON.stringify(plan) } });
   assert.equal(result.isError, undefined, result.content[0].text); assert.equal(JSON.parse(result.content[0].text).applied, true);
+  await rm(join(job, 'controlled-plan-1.json'));
+  const builtMotion = await client.callTool({ name: 'evaluate_keyframes', arguments: { planJson: '' } });
+  assert.equal(builtMotion.isError, undefined, builtMotion.content[0].text);
+  assert.equal(JSON.parse(builtMotion.content[0].text).keyframes[0].count, 3);
   const saved = await client.callTool({ name: 'inspect_timeline', arguments: {} });
   assert.equal(saved.isError, undefined, saved.content[0].text);
   const track = JSON.parse(saved.content[0].text).tracks.find(track => track.type === 'video' && track.segments.length);
   assert.equal(track.segments[0].curves.length, 2); assert.equal(track.segments[0].curves[0].keyframe_list.length, 3);
   const independent = await createLocalEditingSession({ root, job, role: 'reviewer' });
   assert.ok(independent.tools.some(tool => tool.name === 'discover_capabilities'));
+  await assert.rejects(independent.call('evaluate_keyframes', { planJson: '' }), /No host-saved plan/);
   await assert.rejects(independent.call('apply_edit_plan', { planJson: JSON.stringify(plan) }), /not allowed/);
   await assert.rejects(independent.call('reference_frames', { media: 'source', times: [-1] }), /Invalid/);
+  const nativeFolder = join(job, 'native-preview-test'); await mkdir(nativeFolder);
+  const nativeFrame = join(nativeFolder, 'frame.png'); await writeFile(nativeFrame, 'native-pixels');
+  const nativeIndex = join(nativeFolder, 'frames.json');
+  await writeFile(nativeIndex, JSON.stringify({ duration: 1, width: 320, height: 180, frames: [{ path: nativeFrame, time: 0 }] }));
+  const nativeReceipt = join(nativeFolder, 'capture.json');
+  await writeFile(nativeReceipt, JSON.stringify({ kind: 'capcut-native-preview', status: 'captured', platform: process.platform, capcutVersion: 'fixture',
+    candidateDigest: await directoryDigest(candidate), exported: false, uploaded: false, samples: [{ frame: 0, path: nativeFrame }], assets: [],
+    evidenceFiles: await Promise.all([nativeFrame, nativeIndex].map(async path => ({ path, sha256: await fileDigest(path) }))) }));
+  await writeFile(join(job, 'review-evidence.json'), JSON.stringify({ kind: 'native', indexPath: nativeIndex, receiptPath: nativeReceipt }));
+  const nativeReviewer = await createLocalEditingSession({ root, job, role: 'reviewer' });
+  const frameResult = await nativeReviewer.call('reference_frames', { media: 'preview', times: [0] });
+  assert.equal(frameResult.content.find(item => item.type === 'image').data, Buffer.from('native-pixels').toString('base64'));
+  assert.match(frameResult.content[0].text, /native CapCut/);
+  await writeFile(nativeFrame, 'tampered');
+  await assert.rejects(nativeReviewer.call('reference_frames', { media: 'preview', times: [0] }), /changed/);
   assert.equal(await readFile(join(job, 'original-draft.json'), 'utf8'), JSON.stringify(original));
   const hook = tool_name => spawnSync(process.execPath, [join(root, 'scripts/editing-tool-hook.mjs')], { input: JSON.stringify({ tool_name }), windowsHide: true }).status;
   assert.equal(hook('apply_patch'), 2); assert.equal(hook('mcp__other__apply_edit_plan'), 2);

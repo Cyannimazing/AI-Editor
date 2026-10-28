@@ -48,6 +48,8 @@ capcut keyframe <candidate> <segment> alpha 0.15 1
 
 Use measured keyframe times/values for overshoot, shakes, flashes, zooms, pans, entrances and exits. Preserve untouched existing curves and apply motion relative to existing placement when required. A request may combine multiple native properties and generated assets. Do not reduce editing to transforms alone.
 
+For continuous movement, check velocity between keys. Repeating ease-in-out at every sample can turn a smooth zoom into repeated starts/stops. `evaluate_keyframes` returns `motionDynamics` from the same serialized native curves used by the compiler, including hold intervals and suspected restart points. Interpret these against the requested motion; they are not automatic defects. Keep a continuous ramp through its intended endpoint instead of adding a terminal hold by habit.
+
 ## Compatibility and review
 
 Seed empty projects from a project authored by the installed CapCut version. The bundled older template can produce an “unusual path” error on newer builds even when its path is correct. Preserve native format/version markers and validated active-timeline pointers. Never suppress version/write guards with `--force-write`.
@@ -71,3 +73,7 @@ The v4 text contract supports native bold/italic ranges and installed local TTF/
 Text size conversion and preview decoding now share `src/server/editing/native-text.mjs` (relative units based on the short canvas dimension). Portrait type must not be divided by the long canvas height. The browser reads the saved native text, fill, size and font path, rather than substituting the intended plan. This removes an internal inconsistency; native font substitution and exact glyph metrics still need export calibration. The older landscape fixture only checked text presence, not matching text bounds, so it must not be cited as typography certification.
 
 Catalog entries and the CLI's inline starter effects can have different IDs. The host pins the actual no-cost catalog resource IDs it checked, records the written IDs and still requires observed native playback.
+
+Effect `target` can be `source`, `overlay-N`, `text-N`, or `composition`. Choose `composition` only for an optical treatment intended to affect the complete generated scene over its interval. It writes the native global-composite scope, used by the official builder's interval-wide effects. The compiler rejects this scope when unrelated original visual content overlaps; it never changes a layer-specific request into a global effect automatically. Scope is explicit in execution receipts.
+
+Layer-bound effect tracks use the pinned CLI's experimental binding and need native validation: a Windows 9.6 diagnostic produced a sharp internal-edge pattern despite a populated Motion Blur track. The same resource visibly blurred a global-composite fixture. Do not claim scoped smears are working based on the JSON alone. A standalone effect and a clip companion are different native structures; the engine must validate target, timing, layer preservation and visual output before accepting a new mapping.

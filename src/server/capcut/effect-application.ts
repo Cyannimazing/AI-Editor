@@ -7,6 +7,7 @@ import { runCancellableProcess } from '../../lib/cancellable-process';
 import { searchCapcutMaterials } from './plugin';
 import { effectBundleFiles, inspectEffectResource, selectOfficialEffect } from './effect-resources.mjs';
 import { assertNoLinks } from '../security/paths';
+import { acquireEffectResources, waitForEffectResources } from './effect-acquisition.mjs';
 
 type Entry = { slug: string; name: string; is_vip: boolean; md5: string; resource_id: string; effect_id: string };
 type Item = { resource_id: string; stdraft_uri: string; title?: string; name?: string; is_vip?: boolean };
@@ -16,6 +17,7 @@ type Discovery = { entry: Entry; item: Item; resource: ReturnType<typeof inspect
 /** Called by the job controller, never by a second user-facing search workflow. */
 export async function discoverOfficialEffects(input: {
   effects: Effect[]; catalog: Entry[]; cache: Map<string, unknown>; connected: boolean;
+  job: string; attemptedAcquisitions: Set<string>;
   onLog: (line: string) => void; signal?: AbortSignal;
 }) {
   const discovered: Record<string, Discovery> = {};
@@ -35,7 +37,20 @@ export async function discoverOfficialEffects(input: {
     }
     const item = selectOfficialEffect(entry, result.items) as Item | null;
     if (!item) { input.onLog(`CapCut did not return one unambiguous ${entry.name} resource. Its native catalog entry remains unverified.`); continue; }
-    discovered[slug] = { entry, item, resource: inspectEffectResource(entry, item) };
+    const [resource] = await waitForEffectResources([{ entry, item }], { signal: input.signal, timeoutMs: 2500 });
+    discovered[slug] = { entry, item, resource };
+  }
+  const missing = Object.values(discovered).filter(({ entry, item, resource }) => !resource.available && !input.attemptedAcquisitions.has(`${item.resource_id}:${entry.md5}`));
+  for (let offset = 0; offset < missing.length; offset += 8) {
+    const batch = missing.slice(offset, offset + 8);
+    for (const { entry, item } of batch) input.attemptedAcquisitions.add(`${item.resource_id}:${entry.md5}`);
+    const resources = await acquireEffectResources({ job: input.job, requests: batch, signal: input.signal, onLog: input.onLog });
+    if (!resources || resources.length !== batch.length) throw new Error('Native resource acquisition returned an incomplete result.');
+    resources.forEach((resource: ReturnType<typeof inspectEffectResource>, index: number) => {
+      batch[index].resource = resource;
+      input.onLog(resource.available ? `CapCut downloaded ${batch[index].entry.name}. Its native controls are ready for planning; visual verification is still required.`
+        : `CapCut could not obtain ${batch[index].entry.name}. The missing resource remains unverified.`);
+    });
   }
   return discovered;
 }

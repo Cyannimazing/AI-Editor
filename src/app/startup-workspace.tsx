@@ -72,7 +72,7 @@ export default function StartupWorkspace() {
     <div className="border-b border-white/10 bg-[#111b2a] px-6 py-3 text-sm text-slate-300">
       <button className="mr-4 min-h-11 text-emerald-300 underline" onClick={() => setWorkspace(false)}>Setup and connections</button>
       <button className="mr-4 min-h-11 text-emerald-300 underline" aria-expanded={connectionsOpen} onClick={() => setConnectionsOpen(value => !value)}>Tools &amp; CapCut connection</button>
-      {setup.nativeReview.available ? "Native verification available" : "Build an editable test copy and open it in CapCut. Your original stays unchanged."}
+      {setup.nativeReview.available ? "CapCut player inspection available — no export required. Keep the desktop unlocked during capture." : "Build an editable test copy and open it in CapCut. Your original stays unchanged."}
     </div>
     {connectionsOpen && <aside aria-label="Workspace tools and connections" className="bg-[#080c14] px-5 py-4 text-slate-100"><div className="mx-auto max-w-6xl"><OnlineFeatures installed={Boolean(setup.plugin.installed)} /></div></aside>}
     {!setup.isolation.available && <p role="alert" className="bg-[#111b2a] px-6 py-3 text-sm text-amber-100">{setup.isolation.reason}</p>}
@@ -112,7 +112,7 @@ export default function StartupWorkspace() {
         </div>}
       </section>
       {setup?.account.signedIn && <OnlineFeatures installed={Boolean(setup?.plugin.installed)} />}
-      {setup?.account.signedIn && !setup.nativeReview.available && <p className="mt-5 text-sm leading-6 text-amber-100">{setup.nativeReview.reason}</p>}
+      {setup?.account.signedIn && <p className="mt-5 text-sm leading-6 text-amber-100">{setup.nativeReview.reason}</p>}
       {setup?.account.signedIn && !setup.isolation.available && <p className="mt-4 text-sm leading-6 text-amber-100">{setup.isolation.reason}</p>}
       <p className="mt-6 text-xs leading-5 text-slate-500">Rendering and audio tools run locally. Your instructions and selected preview frames go to Codex for AI review using your account and its usage limits. CapCut cloud uploads and paid generation are not enabled.</p>
     </div>

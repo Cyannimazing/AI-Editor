@@ -23,9 +23,7 @@ if (action === 'status') {
   if (process.platform === 'darwin') {
     if (await running()) await run('/usr/bin/osascript', ['-e', 'tell application "CapCut" to quit'], { timeout: 15000 });
   } else if (await running()) {
-  await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-    'Get-Process -Name CapCut -ErrorAction SilentlyContinue | ForEach-Object { if ($_.MainWindowHandle -ne 0) { [void]$_.CloseMainWindow() } }'],
-  { windowsHide: true, timeout: 15000 });
+  await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', join(import.meta.dirname, 'native-close-windows.ps1')], { windowsHide: true, timeout: 28000 });
   }
   const deadline = Date.now() + 30000;
   while (await running()) {

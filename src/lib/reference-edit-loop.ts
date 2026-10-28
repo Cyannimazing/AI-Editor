@@ -2,6 +2,7 @@ import { reviewAndManage } from "../server/editing/review";
 import { referenceFrames as inspectPreview } from "./reference-media";
 import { createEditingPlan } from "../server/editing/plan";
 import { soundDesignPlanSchema, validateControlledPlan } from "../server/editing/controlled-plan.mjs";
+import { editorPlanResultSchema, resolveEditorPlanResult } from '../server/editing/editor-plan-result.mjs';
 import { includeAudioDefects } from '../server/editing/audio-mix.mjs';
 import { consultSpecialists } from '../server/editing/specialists';
 import { measureJobAudio } from '../server/editing/audio-evidence';
@@ -10,18 +11,21 @@ import { guardSourceMotion, motionCurveReport, plannedMotionDefects } from '../s
 import { includeMotionDefects } from '../server/editing/motion-coverage.mjs';
 import { editingScope, assertEditingScope } from '../server/editing/edit-scope.mjs';
 import { availableTextFonts } from '../server/editing/text-fonts.mjs';
-import { retainTechniqueContract, combineReviews, qualityAction } from '../server/editing/quality.mjs';
+import { retainTechniqueContract, combineReviews, qualityAction, needsDesignReview, requireAudioEvidence } from '../server/editing/quality.mjs';
 import { toolKnowledge } from "../server/setup/tool-knowledge";
 import { capcutPluginStatus, searchCapcutMaterials } from "../server/capcut/plugin";
 import { discoverOfficialEffects, officialEffectContext, applyOfficialEffects } from '../server/capcut/effect-application';
+import { localEffectBuilder } from '../server/capcut/local-builder.mjs';
+import { integrationCapabilities, effectRoutingReceipt } from '../server/capcut/integration-policy.mjs';
 import { referenceEvidenceContext } from "../server/editing/reference-context.mjs";
 import { editingFailureMessage } from "../server/editing/errors.mjs";
 import { nativeReviewCapability } from "../server/capcut/review";
-import { assertNoLinks } from "../server/security/paths";
+import { captureNativePreview } from "../server/capcut/native-preview.mjs";
+import { assertNoLinks, containedPath } from "../server/security/paths";
 import { directoryDigest } from "../server/editing/transaction";
 import { runCancellableProcess } from "./cancellable-process";
 import { execFile } from "node:child_process";
-import { copyFile, readFile, writeFile } from "node:fs/promises";
+import { copyFile, readFile, writeFile, lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { editingToolContext } from "./editing-context";
@@ -66,22 +70,36 @@ export async function runReferenceEditLoop(input: {
   if (!Number.isInteger(budget) || budget < 1 || budget > 4) throw new Error("Use one initial build and at most three correction rounds.");
   const executable = await codexExecutable();
   const schemaPath = join(job, "controlled-plan-schema.json");
+  const editorResultSchemaPath = join(job, 'editor-result-schema.json');
+  const readJobPlanFile = async (path: string) => {
+    await containedPath(job, path);
+    const stat = await lstat(path);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1_000_000) throw new Error('Invalid editor plan result file.');
+    return readFile(path, 'utf8');
+  };
+  const resolveEditorResult = async (path: string) => resolveEditorPlanResult(JSON.parse(await readJobPlanFile(path)),
+    () => readJobPlanFile(join(job, 'mcp-applied-plan.json')));
   const workflow = await readFile(join(workspace, "ai", "contract.md"), "utf8");
   const referenceIndex = reference.indexPath ? JSON.parse(await readFile(reference.indexPath, "utf8")) : undefined;
   const sourceIndex = input.targetEvidence ? JSON.parse(input.targetEvidence) : undefined;
   const referenceEvidence = referenceEvidenceContext(reference, referenceIndex);
   const knowledge = await toolKnowledge();
   const plugin = await capcutPluginStatus().catch(() => ({ authorization: "unavailable", capabilities: { materialSearch: false } }));
+  const integration = integrationCapabilities({ materialSearch: plugin.capabilities.materialSearch, localBuilder: localEffectBuilder().available });
+  await writeFile(join(job, 'capcut-integration.json'), JSON.stringify(integration));
+  onLog(`CapCut integration: ${integration.discovery === 'official-capcut-plugin' ? 'official plugin discovery, local builder and desktop adapter' : 'local catalog; official material search is unavailable'}. No automatic export.`);
   const effectCatalog = [...(knowledge.capcut.catalogs.scene_effects || []), ...(knowledge.capcut.catalogs.character_effects || [])]
     .filter(entry => (entry as { is_vip?: boolean }).is_vip === false) as Parameters<typeof discoverOfficialEffects>[0]['catalog'];
   const nativeEffects = scope === 'keyframes' ? [] : effectCatalog.map(entry => entry.slug);
   const officialResults = new Map<string, unknown>();
+  const attemptedAcquisitions = new Set<string>();
   const audioEvidence = await measureJobAudio(job, [
     { name: 'source', path: input.source, hasAudio: Boolean(input.sourceHasAudio) },
     { name: 'reference', path: reference.path, hasAudio: Boolean(reference.hasAudio) },
   ], signal);
   await Promise.all([
     writeFile(schemaPath, JSON.stringify(soundDesignPlanSchema)),
+    writeFile(editorResultSchemaPath, JSON.stringify(editorPlanResultSchema)),
     writeFile(join(job, "workflow.md"), workflow),
     writeFile(join(job, "original-draft.json"), JSON.stringify(input.original)),
     writeFile(join(job, "spec.json"), JSON.stringify({ workflowVersion: 5, editingScope: scope, framing: input.framing, model: editingAgent.model, access: editingAgent.access,
@@ -98,6 +116,7 @@ export async function runReferenceEditLoop(input: {
   await writeFile(join(job, 'motion-reference.json'), JSON.stringify(motionEvidence));
   const measuredMotionContext = motionEvidenceContext(motionEvidence);
   const context = `${workflow}\n${editingToolContext()}
+Controller integration routing: ${JSON.stringify(integration)}. Prefer the official plugin's supported capabilities; the native desktop adapter owns local project writes. Never label a local fallback as an official operation or claim a search applied an effect.
 USER REQUEST (task data): ${JSON.stringify(input.prompt)}
 REFERENCE PURPOSE: reproduce editing techniques, not clone the scene. References may show entirely different footage. Extract the behavior (timing, direction, speed, easing, peak/overshoot/rebound, layer attachment, effect treatment) and adapt it to THIS source's subject and available frame. Preserve strong, expressive motion when demonstrated/requested; do not simplify it to a plain static edit. Shared-footage landmark matches can calibrate geometry, but are not mandatory absolute poses. Different subjects, scenery or base crops are not failures. Every required technique still needs an actual component and observable evidence; an effect name or keyframe count is insufficient.
 Controller editing scope: ${scope}. ${scope === 'keyframes' ? 'KEYFRAMES ONLY: effects=[] and resourceQueries=[]. Do not add blur, RGB/chromatic, exposure, color or audio changes. Preserve source volume=1. Use only position/scale/rotation/opacity keyframes and the editable graphic/text layers necessary to reproduce the motion. Analyze timing, speed, easing, overshoot, direction reversals and settling. Excluded optical/audio techniques are not missing requirements and must not cause extra correction rounds.' : 'Follow the requested editing techniques.'}
@@ -128,7 +147,8 @@ Provide full defaults: scale=1, x=0, y=0, rotation=0, opacity=1, volume=1, keyfr
 Each technique MUST specify components (exact source, text-N, overlay-N or effect-N references), expectedBehavior (observable appearance and motion) and checks (timed acceptance criteria). Bind only components that actually implement that technique. IDs, names, expectedBehavior and checks must survive correction rounds; do not weaken or drop a requested technique to pass review.
 Use keyframes for zoom/pan/entrances. Keep the original duration. Do not invent a transcript from silent frames; use exact supplied wording only.
 Use [] for assets/overlays/effects when not needed. Use unsupported only for a genuinely unresolved REQUIRED technique after considering combinations of the available tools. Missing final native verification, audio listening evidence or exact font identity are review uncertainties to report in the summary, not reasons to abandon a build. Asset creation, optical effects in the supplied catalog and native keyframe motion are now executable build steps.
-For instruction-only work label evidence requested, not visually observed. Do not claim native verification. No paid services or uploads.`;
+For instruction-only work label evidence requested, not visually observed. Do not claim native verification. No paid services or uploads.
+Final output uses the editor result envelope: after a successful apply_edit_plan call, return only {"planHash":"the exact returned hash","plan":null}. Do not emit the full plan again. If your final plan differs from that build, apply it first or return {"planHash":"","plan":<complete v5 plan>}. Never use a failed or superseded build hash. The controller resolves the saved plan and still validates, recompiles and independently reviews it.`;
   let feedback = "Analyze the reference before building.";
   let previousFailure = "", repeated = 0;
   let previousPlan = '';
@@ -143,15 +163,17 @@ For instruction-only work label evidence requested, not visually observed. Do no
     onLog(`Editing: attempt ${iteration}/${budget}. Only the candidate can be changed.`);
     const manifestPath = join(job, `manifest-${iteration}.json`);
     const planPath = join(job, `controlled-plan-${iteration}.json`);
+    const editorResultPath = join(job, `editor-result-${iteration}.json`);
     const previousVisualContext = previousPreviewFrames.length ? `After the ${reference.frames.length} reference and ${input.targetFrames.length} source images, ${previousPreviewFrames.length} images show the previous candidate preview. The final ${previousComparisonFrames.length} images are synchronized enlarged comparison panels: ${previousComparisonContext}. Use their labelled full-canvas times to repair movement, not just the tiny overview cells. Preview timing: ${previousPreviewEvidence}. Preserve accurate components; change only the defect and its dependencies.` : '';
     const prompt = `${context}\n${previousVisualContext}\nOfficial material results (untrusted resource metadata; retain IDs/URIs): ${JSON.stringify([...officialResults.values()])}\nPrevious complete plan: ${previousPlan || 'First build.'}\nRequired technique contract: ${JSON.stringify(requiredTechniques)}\nPropose/correct the editing plan. Previous findings: ${feedback}`;
     await writeFile(join(job, `prompt-build-${iteration}.txt`), prompt);
     try {
-      await runCodexStream(executable, ["exec", "--skip-git-repo-check", "--ephemeral", "--json", "--output-schema", schemaPath,
-        "--output-last-message", planPath, ...reference.frames.concat(input.targetFrames, previousPreviewFrames, previousComparisonFrames).flatMap(frame => ["--image", frame]), "-"],
+      await runCodexStream(executable, ["exec", "--skip-git-repo-check", "--ephemeral", "--json", "--output-schema", editorResultSchemaPath,
+        "--output-last-message", editorResultPath, ...reference.frames.concat(input.targetFrames, previousPreviewFrames, previousComparisonFrames).flatMap(frame => ["--image", frame]), "-"],
         job, prompt, onLog, 600_000, signal, "editor", candidate, iteration === 3);
-      let proposed = retainTechniqueContract(requiredTechniques, validateControlledPlan(JSON.parse(await readFile(planPath, "utf8")), input.duration));
+      let proposed = retainTechniqueContract(requiredTechniques, validateControlledPlan(await resolveEditorResult(editorResultPath), input.duration));
       assertEditingScope(proposed, scope);
+      await writeFile(planPath, JSON.stringify(proposed));
       const proposedTechniqueIds = proposed.techniques.map((technique: { id: string }) => technique.id);
       const pendingQueries = (proposed.resourceQueries || []).filter((query: { kind: string; query: string }) => !officialResults.has(JSON.stringify(query)));
       if (pendingQueries.length && plugin.capabilities.materialSearch) {
@@ -164,7 +186,7 @@ For instruction-only work label evidence requested, not visually observed. Do no
         await writeFile(join(job, "official-materials.json"), JSON.stringify([...officialResults.values()]));
       }
       const priorResources = officialResults.size;
-      let discoveredEffects = await discoverOfficialEffects({ effects: proposed.effects || [], catalog: effectCatalog, cache: officialResults,
+      let discoveredEffects = await discoverOfficialEffects({ job, attemptedAcquisitions, effects: proposed.effects || [], catalog: effectCatalog, cache: officialResults,
         connected: plugin.capabilities.materialSearch, onLog, signal });
       await writeFile(join(job, 'official-materials.json'), JSON.stringify([...officialResults.values()]));
       const motionPreflight = input.clipId ? [] : plannedMotionDefects(proposed, motionEvidence, { width: input.width, height: input.height, fps: input.original.fps || 30 });
@@ -176,11 +198,12 @@ For instruction-only work label evidence requested, not visually observed. Do no
       if (motionPreflight.length || specialistReports.some(report => report.findings.some((finding: { priority: string }) => finding.priority === 'required') || !report.reused && report.findings.length) || pendingQueries.length && plugin.capabilities.materialSearch || officialResults.size > priorResources) {
         onLog('Lead editor: integrating specialist measurements and tool results into one candidate plan.');
         await writeFile(join(job, `proposed-plan-${iteration}.json`), JSON.stringify(proposed));
-        await runCodexStream(executable, ['exec', '--skip-git-repo-check', '--ephemeral', '--json', '--output-schema', schemaPath,
-          '--output-last-message', planPath, ...reference.frames.concat(input.targetFrames, previousPreviewFrames, previousComparisonFrames).flatMap(frame => ['--image', frame]), '-'], job,
-          `${context}\n${specialistContext}\n${previousVisualContext}\nPrevious findings: ${feedback}\nRequired technique contract: ${JSON.stringify(requiredTechniques)}\nProposed plan: ${JSON.stringify(proposed)}\nSpecialist findings (independent proposals): ${JSON.stringify(specialistReports)}\nIntegrate required corrections into the complete v5 plan. Preserve components already matching the evidence. Keep every required technique. Use local MCP evidence/curve checks, then return JSON.`,
+        const integratedResultPath = join(job, `editor-integrated-result-${iteration}.json`);
+        await runCodexStream(executable, ['exec', '--skip-git-repo-check', '--ephemeral', '--json', '--output-schema', editorResultSchemaPath,
+          '--output-last-message', integratedResultPath, ...reference.frames.concat(input.targetFrames, previousPreviewFrames, previousComparisonFrames).flatMap(frame => ['--image', frame]), '-'], job,
+          `${context}\n${specialistContext}\n${previousVisualContext}\nPrevious findings: ${feedback}\nRequired technique contract: ${JSON.stringify(requiredTechniques)}\nProposed plan: ${JSON.stringify(proposed)}\nSpecialist findings (independent proposals): ${JSON.stringify(specialistReports)}\nIntegrate required corrections into the complete v5 plan. Preserve components already matching the evidence. Keep every required technique. Use local MCP evidence/curve checks and apply_edit_plan, then return the hash envelope described above. Use the full-plan envelope only if the final plan could not be built.`,
           onLog, 360000, signal, 'editor', candidate);
-        proposed = retainTechniqueContract(requiredTechniques, validateControlledPlan(JSON.parse(await readFile(planPath, 'utf8')), input.duration));
+        proposed = retainTechniqueContract(requiredTechniques, validateControlledPlan(await resolveEditorResult(integratedResultPath), input.duration));
         assertEditingScope(proposed, scope);
         if (proposedTechniqueIds.some((id: string) => !proposed.techniques.some((technique: { id: string }) => technique.id === id))) throw new Error('Specialist integration omitted a requested technique. Retain every technique ID.');
       }
@@ -196,11 +219,12 @@ For instruction-only work label evidence requested, not visually observed. Do no
       requiredTechniques = proposed.techniques.map(({ id, name, expectedBehavior, checks }: { id: string; name: string; expectedBehavior: string; checks: string[] }) => ({ id, name, expectedBehavior, checks }));
       previousPlan = JSON.stringify(proposed);
       await writeFile(planPath, previousPlan);
-      discoveredEffects = await discoverOfficialEffects({ effects: proposed.effects || [], catalog: effectCatalog, cache: officialResults,
+      discoveredEffects = await discoverOfficialEffects({ job, attemptedAcquisitions, effects: proposed.effects || [], catalog: effectCatalog, cache: officialResults,
         connected: plugin.capabilities.materialSearch, onLog, signal });
       await writeFile(join(job, 'official-materials.json'), JSON.stringify([...officialResults.values()]));
       const officialApplication = await applyOfficialEffects({ job, iteration, effects: proposed.effects || [], discovered: discoveredEffects,
         width: input.width, height: input.height, duration: input.duration, onLog, signal });
+      await writeFile(join(job, `capcut-routing-${iteration}.json`), JSON.stringify(effectRoutingReceipt(proposed.effects || [], officialApplication.bindings, integration)));
       await writeFile(join(job, 'required-techniques.json'), JSON.stringify(requiredTechniques));
       history.push({ iteration, phase: 'specialists_complete', message: specialistReports.map(report => report.role).join(', ') || 'No specialist required for this change.' });
       await writeFile(join(job, 'loop-history.json'), JSON.stringify(history));
@@ -224,9 +248,12 @@ For instruction-only work label evidence requested, not visually observed. Do no
       if (officialApplication.applied) manifest.toolsUsed.push('Official CapCut local effect builder and native adapter');
       const analysis = JSON.parse(await readFile(join(job, "reference-analysis.json"), "utf8")) as ReferenceAnalysis;
       const draft = (await readNativeDraft(candidate)).draft;
+      const execution = JSON.parse(await readFile(join(job, `execution-${iteration}.json`), 'utf8'));
+      const compositionEffectIds = (proposed.effects || []).flatMap((effect: { target?: string }, index: number) => effect.target === 'composition'
+        ? draft.tracks.flatMap(track => track.segments).filter(segment => segment.id === execution.refs[`effect-${index}`]).map(segment => segment.material_id) : []);
       await validateNativeCandidate({ original: input.original, candidate: draft, manifest, analysis, clipId: input.clipId,
         start: Math.round(input.start * 1_000_000), duration: Math.round(input.duration * 1_000_000), candidatePath: candidate,
-        sourcePaths: [input.source, ...(input.originalSource ? [input.originalSource] : [])], width: input.width, height: input.height });
+        sourcePaths: [input.source, ...(input.originalSource ? [input.originalSource] : [])], width: input.width, height: input.height, compositionEffectIds });
       const lint = await run(process.execPath, [cli, "lint", candidate, "--json"], { timeout: 120000, signal, windowsHide: true, maxBuffer: 4_000_000 })
         .catch(error => {
           if (error.stdout) { try { JSON.parse(error.stdout); return { stdout: String(error.stdout), stderr: String(error.stderr || "") }; } catch { /* Keep non-JSON process failures. */ } }
@@ -238,7 +265,6 @@ For instruction-only work label evidence requested, not visually observed. Do no
       const plan = createEditingPlan(draft);
       const checkedComponents = manifest.effects.flatMap(effect => effect.segmentIds);
       const segments = draft.tracks.flatMap(track => track.segments).filter(segment => checkedComponents.includes(segment.id));
-      const execution = JSON.parse(await readFile(join(job, `execution-${iteration}.json`), 'utf8'));
       const curveReport = motionCurveReport(proposed, draft, execution.refs, motionEvidence, { width: input.width, height: input.height, duration: input.duration, fps: input.original.fps || 30 });
       await writeFile(join(job, `motion-curves-${iteration}.json`), JSON.stringify(curveReport));
       await writeFile(join(job, `structural-evidence-${iteration}.json`), JSON.stringify({ candidateDigest: await directoryDigest(candidate),
@@ -292,16 +318,18 @@ For instruction-only work label evidence requested, not visually observed. Do no
       }
       catch { signal?.throwIfAborted(); onLog("Preview images are unavailable; visual comparison cannot be completed."); }
       let findings = combineReviews([], proposed.techniques, false, await directoryDigest(candidate), [...proposed.unsupported, ...(manifest.verificationGaps || [])]);
-      if (previewFrames.length) {
+      const capability = nativeReviewCapability();
+      if (previewFrames.length && needsDesignReview(capability.available, motionDefects)) {
         onLog("Reviewing: visual reviewer and quality manager are checking the design evidence.");
         findings = await reviewAndManage({ job, candidate, request: input.prompt, referenceFrames: reference.frames,
           previewFrames, comparisonFrames, comparisonContext, referenceEvidence, previewEvidence, nativeVerified: false, iteration, signal, onLog });
+      } else if (capability.available) {
+        onLog('Fast checks complete. Independent reviewers will assess the actual CapCut player instead of repeating an approximate-preview review.');
       }
       const mixReport = await readFile(join(job, `audio-mix-report-${iteration}.json`), 'utf8').then(JSON.parse).catch(() => null);
       findings = includeMotionDefects(findings, motionDefects, proposed.techniques);
       if (mixReport) findings = includeAudioDefects(findings, mixReport, proposed.techniques);
-      else if (proposed.audio?.clips.length) findings = { ...findings, decision: findings.defects.length ? 'revise' : 'blocked',
-        unknowns: [...findings.unknowns, 'The generated audio mix has no rendered signal evidence; its volume curves, clipping and silence remain unverified.'] };
+      findings = requireAudioEvidence(findings, Boolean(proposed.audio?.clips.length), Boolean(mixReport));
       await writeFile(join(job, `quality-report-${iteration}.json`), JSON.stringify(findings));
       await writeFile(join(job, 'quality-report.json'), JSON.stringify(findings));
       const action = qualityAction(findings, iteration, budget);
@@ -313,7 +341,6 @@ For instruction-only work label evidence requested, not visually observed. Do no
         return { manifest, iterations: iteration, model: editingAgent.model, access: editingAgent.access, verified: false, evidencePath: '', quality: findings };
       }
       const revision = await directoryDigest(candidate);
-      const capability = nativeReviewCapability();
       if (!capability.available) {
         onLog(capability.reason);
         history.push({ iteration, phase: "native_verification_blocked", message: capability.reason });
@@ -321,8 +348,45 @@ For instruction-only work label evidence requested, not visually observed. Do no
         await writeFile(join(job, "review.json"), JSON.stringify({ matched: false, nativeOutput: "unavailable", candidateDigest: revision, notes: capability.reason }));
         return { manifest, iterations: iteration, model: editingAgent.model, access: editingAgent.access, verified: false, evidencePath: "", quality: findings };
       }
-      // Fail closed until an adapter produces independently captured, revision-bound native evidence.
-      throw new Error("Native capture adapter did not supply verified evidence.");
+      let captured;
+      try {
+        captured = await captureNativePreview({ job, candidate, revision, start: input.start, duration: input.duration,
+          width: input.width, height: input.height, signal, onLog });
+        await input.assertOriginalUnchanged();
+      } catch (error) {
+        signal?.throwIfAborted();
+        const reason = editingFailureMessage(error);
+        onLog(`Native verification needs attention: ${reason}`);
+        findings = { ...findings, decision: 'blocked', unknowns: [...findings.unknowns, `Native capture: ${reason}`] };
+        history.push({ iteration, phase: 'native_capture_failed', message: reason });
+        await writeFile(join(job, 'loop-history.json'), JSON.stringify(history));
+        await writeFile(join(job, 'quality-report.json'), JSON.stringify(findings));
+        return { manifest, iterations: iteration, model: editingAgent.model, access: editingAgent.access, verified: false, evidencePath: '', quality: findings };
+      }
+      const nativeFrames = captured.nativeFrames;
+      const nativeIndex = JSON.parse(await readFile(nativeFrames.indexPath, 'utf8'));
+      const nativeTiming = referenceEvidenceContext(nativeFrames, nativeIndex);
+      const nativeAudit = await auditMotionFrames(job, referenceIndex, nativeIndex, motionEvidence, iteration, signal);
+      const nativeComparisons = await buildMotionComparisons(job, proposed, referenceIndex, sourceIndex, nativeIndex, iteration, signal, nativeAudit.defects.map((defect: { timeSeconds: number }) => defect.timeSeconds));
+      onLog('Comparing actual CapCut output: visual reviewer and quality manager are assessing every technique.');
+      findings = await reviewAndManage({ job, candidate, request: input.prompt, referenceFrames: reference.frames,
+        previewFrames: nativeFrames.frames, comparisonFrames: nativeComparisons.images?.map((item: { path: string }) => item.path) || [],
+        comparisonContext: nativeComparisons.layout, referenceEvidence, previewEvidence: nativeTiming, nativeVerified: true,
+        nativeReceiptPath: captured.receiptPath, iteration, signal, onLog });
+      findings = includeMotionDefects(findings, nativeAudit.defects, proposed.techniques);
+      if (mixReport) findings = includeAudioDefects(findings, mixReport, proposed.techniques);
+      findings = requireAudioEvidence(findings, Boolean(proposed.audio?.clips.length), Boolean(mixReport));
+      await writeFile(join(job, `native-quality-${iteration}.json`), JSON.stringify(findings));
+      await writeFile(join(job, 'quality-report.json'), JSON.stringify(findings));
+      previousPreviewFrames = nativeFrames.frames; previousPreviewEvidence = `Native CapCut output: ${nativeTiming}`;
+      previousComparisonFrames = nativeComparisons.images?.map((item: { path: string }) => item.path) || [];
+      previousComparisonContext = nativeComparisons.layout;
+      const nativeAction = qualityAction(findings, iteration, budget);
+      history.push({ iteration, phase: `native_${nativeAction}`, message: findings.summary });
+      await writeFile(join(job, 'loop-history.json'), JSON.stringify(history));
+      if (nativeAction === 'repair') throw new Error(JSON.stringify(findings.defects).slice(0, 10000));
+      return { manifest, iterations: iteration, model: editingAgent.model, access: editingAgent.access,
+        verified: nativeAction === 'approve', evidencePath: captured.receiptPath, quality: findings };
     } catch (error) {
       signal?.throwIfAborted();
       const message = editingFailureMessage(error);

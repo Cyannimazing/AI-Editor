@@ -5,12 +5,12 @@ import { updateReferencePrompt } from "@/lib/reference-prompts.mjs";
 import { readableProgress } from "@/lib/edit-progress.mjs";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Image from "next/image";
+import { ClipSelection } from './clip-selection';
 
 type Clip = { id: string; name: string; trackName: string; startUs: number; durationUs: number };
 type Project = { id: string; name: string; hasTimelineContent: boolean; clips: Clip[] };
-type Recipe = { id: string; name: string; prompt: string; effects: string[]; createdAt: string };
 type EditResult = { projectId: string; projectName: string; applied: string[]; toolsUsed: string[]; notes: string; backup: string;
+  scope?: string; selectedClipIds?: string[]; previewLabel?: string; projectPlan?: { summary: string; clips: { clipId: string; action: string; instruction: string; reason: string }[]; unsupported: string[] };
   model?: string; access?: string; iterations?: number; verified?: boolean; evidencePath?: string; revision: string; previewUrl?: string;
   quality?: { decision: string; summary: string; defects: { component: string; timeSeconds: number; expected: string; observed: string }[];
     techniques: { id: string; name: string; status: string; evidence: string[] }[]; unknowns: string[] } };
@@ -21,14 +21,13 @@ const button = "min-h-11 rounded-xl bg-emerald-300 px-5 py-3 text-sm font-semibo
 
 export default function KeyframeHelper({ setupComplete }: { setupComplete: boolean }) {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [projectId, setProjectId] = useState("");
-  const [clipId, setClipId] = useState("");
+  const [clipIds, setClipIds] = useState<string[]>([]);
+  const [editScope, setEditScope] = useState<'project' | 'clips'>('project');
   const [rawVideo, setRawVideo] = useState<File | null>(null);
   const [reference, setReference] = useState<File | null>(null);
   const [referenceUrl, setReferenceUrl] = useState("");
   const referenceFile = useRef<HTMLInputElement>(null);
-  const [recipeId, setRecipeId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [jobId, setJobId] = useState("");
   const [status, setStatus] = useState<Job["status"] | "idle">("idle");
@@ -36,9 +35,6 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
   const [rawTranscript, setRawTranscript] = useState(false);
   const [result, setResult] = useState<EditResult | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
-  const [recipeName, setRecipeName] = useState("");
-  const [saved, setSaved] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [starting, setStarting] = useState(false);
   const [opening, setOpening] = useState(false);
@@ -50,22 +46,16 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
   const progress = readableProgress(transcript);
 
   const refresh = useCallback(async () => {
-    const [projectsResponse, recipesResponse] = await Promise.all([
-      apiFetch(`/api/helper${includeLocal ? "?includeLocal=1" : ""}`, { cache: "no-store" }),
-      apiFetch("/api/edit-recipes", { cache: "no-store" }),
-    ]);
+    const projectsResponse = await apiFetch(`/api/helper${includeLocal ? "?includeLocal=1" : ""}`, { cache: "no-store" });
     const projectData = await projectsResponse.json();
-    const recipeData = await recipesResponse.json();
-    if (!projectsResponse.ok || !recipesResponse.ok) throw new Error(projectData.error || recipeData.error || "Could not load projects.");
+    if (!projectsResponse.ok) throw new Error(projectData.error || "Could not load projects.");
     const available = projectData.projects as Project[];
     setProjects(available);
     setProjectId((current) => available.some((project) => project.id === current) ? current : available.length === 1 ? available[0].id : "");
-    setRecipes(recipeData.recipes as Recipe[]);
   }, [includeLocal]);
 
   const project = projects.find((item) => item.id === projectId);
-  const selectedClip = project?.clips.find((item) => item.id === clipId) ?? (project?.clips.length === 1 ? project.clips[0] : undefined);
-  const targetReady = project?.hasTimelineContent ? Boolean(selectedClip) : Boolean(project && rawVideo);
+  const targetReady = project?.hasTimelineContent ? (editScope === 'project' ? project.clips.length > 0 : clipIds.length > 0 && clipIds.every(id => project.clips.some(clip => clip.id === id))) : Boolean(project && rawVideo);
 
   useEffect(() => {
     void Promise.resolve().then(refresh).catch((cause) => setError(cause instanceof Error ? cause.message : "Could not load projects."));
@@ -74,8 +64,6 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
   useEffect(() => {
     void Promise.resolve().then(() => {
       const previous = window.sessionStorage.getItem("ai-editor-last-job");
-      const skillName = window.sessionStorage.getItem("ai-editor-skill-name");
-      if (skillName) setRecipeName(skillName);
       if (previous) { setJobId(previous); setStatus("running"); }
     });
   }, []);
@@ -127,18 +115,17 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
     setResult(null);
     setOpenedCopy("");
     setPreviewUrl("");
-    setSaved(false);
     setTranscript([]);
     setJobId("");
     offset.current = 0;
     const form = new FormData();
     form.set("projectId", projectId);
-    if (project?.hasTimelineContent && selectedClip) form.set("clipId", selectedClip.id);
+    form.set('editScope', project?.hasTimelineContent ? editScope : 'project');
+    if (project?.hasTimelineContent) form.set('clipIds', JSON.stringify(editScope === 'clips' ? clipIds : []));
     else if (rawVideo) form.set("rawVideo", rawVideo);
     form.set("prompt", prompt.trim());
     if (reference) form.set("reference", reference);
     if (referenceUrl.trim()) form.set("referenceUrl", referenceUrl.trim());
-    if (recipeId) form.set("recipeId", recipeId);
     try {
       const response = await apiFetch("/api/apply-native", { method: "POST", body: form });
       const data = await response.json();
@@ -147,11 +134,6 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
       setStatus("running");
       setCanCancel(true);
       setJobId(data.id);
-      if (!recipeName.trim()) {
-        const name = `${reference?.name.replace(/\.[^.]+$/, "") ?? recipes.find((item) => item.id === recipeId)?.name ?? "Reference"} edit`;
-        setRecipeName(name);
-        window.sessionStorage.setItem("ai-editor-skill-name", name);
-      }
     } catch (cause) {
       setStatus("failed");
       setError(cause instanceof Error ? cause.message : "Could not start the edit.");
@@ -171,24 +153,6 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
       setStatus("cancelling");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not cancel the run.");
-    }
-  }
-
-  async function saveRecipe() {
-    if (!jobId || !result || status !== "complete") return;
-    setSaving(true);
-    setError("");
-    try {
-      const response = await apiFetch("/api/edit-recipes", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId, name: recipeName }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not save the skill.");
-      setSaved(true);
-      await refresh();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not save the skill.");
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -235,30 +199,20 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
     try {
       const response = await apiFetch("/api/helper", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "create-local-project" }) });
       const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not create a test project.");
-      setIncludeLocal(true); await refresh(); setProjectId(data.projectId); setClipId("");
+      setIncludeLocal(true); await refresh(); setProjectId(data.projectId); setClipIds([]); setEditScope('project');
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create a test project."); }
     finally { setStarting(false); }
   }
 
   const running = starting || status === "running" || status === "cancelling" || status === "committing";
-  const skillSaved = saved || recipes.some((recipe) => recipe.id === jobId);
-
-  function selectSkill(recipe: Recipe) {
-    setRecipeId(recipe.id);
-    setReference(null);
-    setReferenceUrl("");
-    if (referenceFile.current) referenceFile.current.value = "";
-    setPrompt(recipe.prompt);
-  }
-
   function chooseReference(file: File | null) {
-    setReference(file); setRecipeId("");
+    setReference(file);
     if (file) setReferenceUrl("");
     setPrompt(current => updateReferencePrompt(current, file ? (file.type.startsWith("video/") || /\.(mp4|mov|mkv|webm)$/i.test(file.name) ? "video" : "image") : ""));
   }
 
   function changeReferenceUrl(value: string) {
-    setReferenceUrl(value); setReference(null); setRecipeId("");
+    setReferenceUrl(value); setReference(null);
     if (referenceFile.current) referenceFile.current.value = "";
     setPrompt(current => updateReferencePrompt(current, value.trim() ? "link" : ""));
   }
@@ -267,17 +221,17 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
     <div className="mx-auto max-w-6xl space-y-6">
       <header className="border-b border-white/10 pb-6">
         <p className="text-xs font-semibold uppercase tracking-[0.25em] text-emerald-300">CapCut automation</p>
-        <h1 className="mt-2 text-3xl font-semibold">Edit from a reference</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Choose a CapCut project and a reference. Edit one existing timeline clip, or add raw footage to an empty project.</p>
+        <h1 className="mt-2 text-3xl font-semibold">Edit your CapCut project</h1>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Choose a project and describe the changes. Work across its active timeline or check specific clips. A reference is optional.</p>
       </header>
 
       {error && <div role="alert" className="rounded-xl border border-amber-300/30 bg-amber-300/10 p-4 text-sm text-amber-100">{error}</div>}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <section className="space-y-5 rounded-2xl border border-white/10 bg-[#111b2a] p-5 sm:p-6">
-          <div><p className="text-xs font-semibold uppercase tracking-widest text-emerald-300">01 · Target</p><h2 className="mt-2 text-xl font-semibold">Video to edit</h2></div>
+          <div><p className="text-xs font-semibold uppercase tracking-widest text-emerald-300">01 · Project</p><h2 className="mt-2 text-xl font-semibold">Where to save your edit</h2></div>
           <label className="block text-sm text-slate-300">CapCut project
-            <select className={field} value={projectId} disabled={running} onChange={(event) => { setProjectId(event.target.value); setClipId(""); }}>
+            <select className={field} value={projectId} disabled={running} onChange={(event) => { setProjectId(event.target.value); setClipIds([]); setEditScope('project'); setRawVideo(null); }}>
               <option value="">Select project</option>
               {projects.map((project) => <option key={project.id} value={project.id}>{project.name} — {project.hasTimelineContent ? `${project.clips.length} video clips` : "Empty timeline"}</option>)}
             </select>
@@ -285,19 +239,9 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
           <button className="text-xs font-medium text-emerald-300 hover:text-emerald-200" disabled={running} onClick={() => void refresh().catch((cause) => setError(String(cause)))}>Refresh projects</button>
           <button className="ml-4 min-h-11 text-xs font-medium text-emerald-300" disabled={running} onClick={() => void createProject()}>Create disposable test project</button>
           <label className="flex min-h-11 items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={includeLocal} disabled={running} onChange={event => setIncludeLocal(event.target.checked)} />Show AI-Editor test fixtures</label>
-          <p className="text-xs leading-5 text-slate-400">Projects come from your CapCut library. Edits are built as separate candidates.</p>
+          <p className="text-xs leading-5 text-slate-400">{project ? `Approved changes are saved back to “${project.name}”. A private working copy protects your project until approval.` : 'Select the existing project you want to update.'}</p>
           {projects.length === 0 && <p className="text-sm text-amber-200">No local projects found. Save a project in CapCut, then refresh.</p>}
-          {project?.hasTimelineContent ? <div>
-            <h3 id="clip-picker-label" className="text-sm font-medium text-slate-300">Choose the timeline clip to edit</h3>
-            <div className="mt-3 max-h-80 space-y-2 overflow-auto" role="radiogroup" aria-labelledby="clip-picker-label">
-              {project.clips.map((clip) => <label key={clip.id} className={`flex min-h-20 w-full cursor-pointer items-center gap-3 rounded-xl border p-3 text-left focus-within:outline-2 focus-within:outline-emerald-300 ${selectedClip?.id === clip.id ? "border-emerald-300 bg-emerald-300/10" : "border-white/10 bg-[#0b1220] hover:border-white/30"}`}>
-                <input type="radio" name="target-clip" value={clip.id} checked={selectedClip?.id === clip.id} disabled={running} onChange={() => setClipId(clip.id)} className="sr-only" />
-                <Image unoptimized src={`/api/clip-thumbnail?projectId=${encodeURIComponent(project.id)}&clipId=${encodeURIComponent(clip.id)}`} alt="" width={80} height={60} className="h-16 w-20 shrink-0 rounded-lg bg-black object-cover" />
-                <span className="min-w-0"><span className="block break-words text-sm font-medium">{clip.name}</span><span className="mt-1 block text-xs text-slate-400">{clip.trackName} · {(clip.startUs / 1_000_000).toFixed(2)}–{((clip.startUs + clip.durationUs) / 1_000_000).toFixed(2)}s</span></span>
-              </label>)}
-            </div>
-            {project.clips.length ? <p className="mt-3 text-xs leading-5 text-slate-400">Run edits only the selected clip. Other clips and audio stay in place.</p> : <p className="mt-3 text-sm text-amber-200">This timeline has content but no editable video clips.</p>}
-          </div> : <label className="block text-sm text-slate-300">Raw footage to add and edit
+          {project?.hasTimelineContent ? <ClipSelection projectId={project.id} clips={project.clips} scope={editScope} selected={clipIds} disabled={running} onScope={setEditScope} onSelected={setClipIds} /> : <label className="block text-sm text-slate-300">Raw footage to add and edit
             <input className={field} type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska" disabled={running} onChange={(event) => setRawVideo(event.target.files?.[0] ?? null)} />
           </label>}
           {!project?.hasTimelineContent && rawVideo && <p className="text-xs text-slate-400">{rawVideo.name} · {(rawVideo.size / 1024 / 1024).toFixed(1)} MB</p>}
@@ -313,12 +257,6 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
             <input className={field} type="url" value={referenceUrl} maxLength={2048} placeholder="https://…" disabled={running} onChange={event => changeReferenceUrl(event.target.value)} />
           </label>
           <p className="text-xs leading-5 text-slate-400">Public images, videos and pages that expose downloadable media are supported. Login-only pages and embedded players may require a file. You can also leave both references empty and just write instructions.</p>
-          {recipes.length > 0 && <label className="block text-sm text-slate-300">Or reuse a saved skill
-            <select className={field} value={recipeId} disabled={running} onChange={(event) => { const id = event.target.value; setRecipeId(id); const recipe = recipes.find((item) => item.id === id); if (recipe) selectSkill(recipe); }}>
-              <option value="">Choose a skill</option>
-              {recipes.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
-            </select>
-          </label>}
           <label className="block text-sm text-slate-300">What should Codex copy or change?
             <textarea className={`${field} min-h-28 resize-y`} value={prompt} placeholder="Describe the changes you want. Include exact words for any titles or captions." disabled={running} maxLength={4000} onChange={(event) => setPrompt(event.target.value)} />
           </label>
@@ -332,29 +270,6 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
           {jobId && running && <button className="min-h-11 rounded-xl border border-amber-300/40 px-5 py-3 text-sm font-semibold text-amber-100 hover:bg-amber-300/10 disabled:cursor-not-allowed disabled:opacity-40" disabled={!canCancel || status === "cancelling"} onClick={() => void cancelRun()}>{status === "cancelling" ? "Stopping tools…" : canCancel ? "Cancel run" : "Finishing write…"}</button>}</div>
         </div>
       </section>
-
-      <div className="grid gap-5 lg:grid-cols-2">
-        <section className="rounded-2xl border border-emerald-300/25 bg-[#111b2a] p-5 sm:p-6" aria-labelledby="save-skill-title">
-          <h2 id="save-skill-title" className="text-lg font-semibold">Save reusable skill</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-400">Save the edit, prompts, technique measurements, build sources and native comparison history under your own name for new footage.</p>
-          <label className="mt-4 block text-sm text-slate-300">Skill name
-            <input className={field} value={recipeName} maxLength={80} placeholder="Name this editing skill" disabled={saving || skillSaved}
-              onChange={(event) => { setRecipeName(event.target.value); window.sessionStorage.setItem("ai-editor-skill-name", event.target.value); }} />
-          </label>
-          <button className={`${button} mt-4`} disabled={running || saving || status !== "complete" || !result || !recipeName.trim() || skillSaved} onClick={() => void saveRecipe()}>{saving ? "Saving…" : skillSaved ? "Skill saved" : "Save skill"}</button>
-          <p className="mt-3 text-xs leading-5 text-slate-400" role="status">{skillSaved ? "Saved in your skills library." : status === "complete" ? "The completed edit is ready to save. Saving is optional." : "Name it now. Save skill becomes available after Run completes successfully."}</p>
-        </section>
-        <section className="rounded-2xl border border-white/10 bg-[#111b2a] p-5 sm:p-6" aria-labelledby="saved-skills-title">
-          <div className="flex items-center justify-between gap-3"><h2 id="saved-skills-title" className="text-lg font-semibold">Saved skills</h2><span className="text-xs text-slate-400">{recipes.length}</span></div>
-          {recipes.length === 0 ? <p className="mt-4 text-sm leading-6 text-slate-400">No skills saved yet. Run an edit, name it, and click Save skill.</p> : <div className="mt-4 max-h-80 space-y-3 overflow-auto">
-            {recipes.map((recipe) => <article key={recipe.id} className={`rounded-xl border p-4 ${recipeId === recipe.id ? "border-emerald-300 bg-emerald-300/5" : "border-white/10 bg-[#0b1220]"}`}>
-              <h3 className="break-words text-sm font-semibold">{recipe.name}</h3>
-              <p className="mt-1 text-xs leading-5 text-slate-400">{recipe.effects.length} techniques · {recipe.effects.join(", ")}</p>
-              <button className={`${button} mt-3`} disabled={running} onClick={() => selectSkill(recipe)}>{recipeId === recipe.id ? "Selected for reuse" : "Use skill"}</button>
-            </article>)}
-          </div>}
-        </section>
-      </div>
 
       {previewUrl && !result && <section className="rounded-2xl border border-white/10 bg-[#111b2a] p-5 sm:p-6">
         <h2 className="text-lg font-semibold">Early design preview</h2>
@@ -374,6 +289,7 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
 
       {result && <section className="rounded-2xl border border-emerald-300/25 bg-[#111b2a] p-5 sm:p-6">
         <h2 className="text-xl font-semibold">{status === "complete" ? "Edit applied to" : "Candidate for"} {result.projectName}</h2>
+        {result.projectPlan && <p className="mt-2 text-sm text-slate-300">Project plan: {result.projectPlan.summary}</p>}
         <p className="mt-2 text-sm text-slate-300">Requested techniques: {result.applied.join(", ")}.</p>
         {result.verified && <p className="mt-2 text-sm text-emerald-300">Native comparison passed after {result.iterations} {result.iterations === 1 ? "iteration" : "iterations"} · {result.model} · {result.access}</p>}
         <p className="mt-2 text-xs text-slate-400">Tools used: {result.toolsUsed.join(", ") || "CapCut CLI"}. {result.verified ? "Native verification passed." : "Quality verification is incomplete. The candidate is available for inspection; your original has not been changed."}</p>
@@ -386,12 +302,12 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
           {result.quality.unknowns.length > 0 && <details className="mt-3 text-xs text-slate-300"><summary>Unresolved verification</summary><ul className="mt-2 space-y-2">{result.quality.unknowns.map((unknown, index) => <li key={index}>{unknown}</li>)}</ul></details>}
         </div>}
         {result.notes && <p className="mt-2 text-xs text-slate-400">{result.notes}</p>}
-        {result.previewUrl && <div className="mt-5"><p className="mb-2 text-sm text-slate-300">Design preview: CapCut-specific effects may differ</p><video controls preload="metadata" src={result.previewUrl} className="max-h-96 w-full rounded-xl bg-black" /></div>}
+        {result.previewUrl && <div className="mt-5"><p className="mb-2 text-sm text-slate-300">{result.previewLabel || 'Design preview'} · CapCut-specific effects may differ</p><video controls preload="metadata" src={result.previewUrl} className="max-h-96 w-full rounded-xl bg-black" /></div>}
         <div className="mt-5 flex flex-wrap gap-3">
           {status === "complete" && <button className={button} onClick={() => void openProject()}>Open project in CapCut</button>}
           {["awaiting_approval", "blocked"].includes(status) && <>
-            <button className={button} disabled={opening} onClick={() => void openTestCopy()}>{opening ? "Opening CapCut…" : "Open editable test copy in CapCut"}</button>
-            <button className={button} disabled={!result.verified || status !== "awaiting_approval"} onClick={() => void decide("approve")}>Approve and apply</button>
+            <button className={button} disabled={!result.verified || status !== "awaiting_approval" || starting} onClick={() => void decide("approve")}>Apply to {result.projectName}</button>
+            <button className="min-h-11 rounded-xl border border-white/20 px-5 py-3 text-sm" disabled={opening || starting} onClick={() => void openTestCopy()}>{opening ? "Opening CapCut…" : "Inspect temporary review copy"}</button>
             <button className="min-h-11 rounded-xl border border-white/20 px-5 py-3 text-sm" onClick={() => void decide("discard")}>Discard candidate</button>
           </>}
           {status === "discarded" && <p role="status">Candidate discarded. Original unchanged.</p>}

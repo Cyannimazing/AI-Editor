@@ -93,7 +93,7 @@ export async function publishCandidate(candidate, destination) {
     restampDraft(loaded.draft, donor.draft, donor.projectDir);
     saveDraft(loaded.filePath, loaded.draft, { preserveProjectFields: true });
   }
-  await assignCandidateIdentity(destination);
+  await assignCandidateIdentity(destination, basename(destination));
   // Root and active timeline must contain the same compiled content on newer CapCut builds.
   const { draft, file: activeFile } = await activeDraft(destination);
   const repository = fileURLToPath(new URL('../', import.meta.url));
@@ -114,6 +114,22 @@ export async function publishCandidate(candidate, destination) {
   }
 }
 
+/** Registration links only. General lint fixes can change authored text/timing. */
+async function linkPublishedMedia(project) {
+  assertClosed();
+  const { loadDraft, saveDraft } = await import('../toolchain/node_modules/capcut-cli/dist/draft.js');
+  const { linkLocalMaterialIds, readSidecar } = await import('../toolchain/node_modules/capcut-cli/dist/materials-register.js');
+  const { lintDraft, summarize, DEFAULT_LINT_OPTIONS } = await import('../toolchain/node_modules/capcut-cli/dist/lint.js');
+  const { draft, filePath } = loadDraft(project, { activeTimeline: existsSync(join(project, 'Timelines')) });
+  const linked = linkLocalMaterialIds(draft, readSidecar(project), project);
+  if (linked.length) saveDraft(filePath, draft, { preserveProjectFields: true });
+  const issues = lintDraft(draft, { ...DEFAULT_LINT_OPTIONS, draftDir: project });
+  const summary = summarize(issues);
+  await writeFile(join(project, 'ai-editor-inspection-lint.json'), JSON.stringify({ summary, issues, linked }));
+  if (summary.errors) throw new Error(`Published draft has ${summary.errors} lint errors. No content repair was applied.`);
+  process.stdout.write(JSON.stringify({ linked: linked.length, warnings: summary.warnings }));
+}
+
 async function isolateCandidate(project) {
   const repository = fileURLToPath(new URL('../', import.meta.url));
   const offset = relative(join(repository, '.local-tools', 'staging'), resolve(project));
@@ -121,14 +137,14 @@ async function isolateCandidate(project) {
   await assignCandidateIdentity(project);
 }
 
-async function assignCandidateIdentity(project) {
+async function assignCandidateIdentity(project, publishedName) {
   const { file, draft } = await activeDraft(project);
   const { assertDraftWriteable } = await import('../toolchain/node_modules/capcut-cli/dist/draft.js');
   const { discoverDraftStore, serializeDraftCandidate } = await import('../toolchain/node_modules/capcut-cli/dist/store.js');
   assertDraftWriteable(file, draft);
   const store = discoverDraftStore(project, { activeTimeline: existsSync(join(project, 'Timelines')) });
   const id = randomUUID().toUpperCase();
-  const name = `AI Editor review ${id.slice(0, 8)}`;
+  const name = publishedName || `AI Editor review ${id.slice(0, 8)}`;
   const pointerPath = join(project, 'Timelines', 'project.json');
   let pointer;
   let newFolder;
@@ -166,5 +182,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   else if (action === 'isolate') await isolateCandidate(project);
   else if (action === 'commit' && destination) await commitCandidate(project, destination);
   else if (action === 'publish' && destination) await publishCandidate(project, destination);
+  else if (action === 'link-media') await linkPublishedMedia(project);
   else throw new Error('Usage: capcut-draft.mjs digest|active|isolate <project> | commit <candidate> <destination>');
 }

@@ -8,6 +8,8 @@ import { openCandidateTestCopy } from "../server/capcut/test-copy";
 import { suggestedReferencePrompt } from "./reference-prompts.mjs";
 import { publicReferenceUrl } from "../server/security/public-reference.mjs";
 import { editingFailureMessage } from "../server/editing/errors.mjs";
+import { listProjects } from './keyframe-helper';
+import { resolveEditSelection } from '../server/editing/project-scope.mjs';
 
 const root = join(process.cwd(), ".local-tools");
 const logs = join(root, "run-logs");
@@ -44,8 +46,12 @@ async function loadJob(id: string) {
 export async function listEditRecipes(): Promise<SavedRecipe[]> {
   try { const data = JSON.parse(await readFile(recipesFile, "utf8")); return Array.isArray(data) ? data : []; } catch { return []; }
 }
-export async function startEditJob(input: { projectId: string; rawVideo?: File | null; clipId?: string; reference?: File | null; referenceUrl?: string; recipeId?: string; prompt: string }) {
-  if (!input.projectId || (!input.clipId && !(input.rawVideo instanceof File))) throw new Error("Choose a project and source footage.");
+export async function startEditJob(input: { projectId: string; rawVideo?: File | null; clipId?: string; clipIds?: string[]; editScope?: string; reference?: File | null; referenceUrl?: string; recipeId?: string; prompt: string }) {
+  if (input.recipeId) throw new Error('Reusable techniques are deferred. Start with a prompt and optional reference.');
+  if (!input.projectId) throw new Error("Choose a project.");
+  const selectedProject = (await listProjects()).find(project => project.id === input.projectId);
+  if (!selectedProject) throw new Error('Selected project is unavailable. Refresh projects.');
+  resolveEditSelection(selectedProject, input);
   const recipe = input.recipeId ? (await listEditRecipes()).find(item => item.id === input.recipeId) : undefined;
   if (input.recipeId && !recipe) throw new Error("Saved skill not found.");
   if ([Boolean(input.reference), Boolean(input.referenceUrl), Boolean(recipe)].filter(Boolean).length > 1) throw new Error("Choose one reference: file, public link or saved skill.");
@@ -91,6 +97,8 @@ export async function getEditJob(id: string, since = 0) {
     result: job.result && { projectId: job.result.projectId, projectName: job.result.projectName, applied: job.result.applied,
       toolsUsed: job.result.toolsUsed, notes: job.result.notes, backup: job.result.backup, model: job.result.model,
       access: job.result.access, iterations: job.result.iterations, verified: job.result.verified, quality: job.result.quality,
+      scope: job.result.scope, selectedClipIds: job.result.selectedClipIds, projectPlan: job.result.projectPlan,
+      previewLabel: job.result.projectPlan ? 'Last edited clip preview; inspect the complete project in CapCut.' : 'Edited clip preview',
       revision: job.result.candidateDigest, previewUrl: `/api/artifact?id=${id}&kind=preview`, evidencePath: job.result.evidencePath } };
 }
 export async function cancelEditJob(id: string) {
@@ -144,6 +152,7 @@ export async function saveEditRecipe(jobId: string, name: string) {
     catch { result = undefined; }
   }
   if (!result) throw new Error("Run and review the edit before saving its skill.");
+  if (result.projectPlan) throw new Error('Multi-clip project recipes are not portable yet. Save a single-clip edit as a reusable skill.');
   const release = await acquireLock(join(root, "locks", "recipes.lock"));
   try {
   const recipes = await listEditRecipes();

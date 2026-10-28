@@ -42,6 +42,8 @@ export function enableNativeCompositing(draft, segmentId) {
 }
 
 export function writeCatalogEffect(draft, effect, target, trackName, { findEnum, addEffect }, officialBinding) {
+  const composite = effect.target === 'composition';
+  if (!composite && !target) throw new Error('Missing native effect target.');
   const scene = findEnum('scene_effects', effect.slug);
   const entry = scene || findEnum('character_effects', effect.slug);
   if (!entry || entry.is_vip !== false) throw new Error(`A verified no-cost catalog entry is required for ${effect.slug}.`);
@@ -49,7 +51,7 @@ export function writeCatalogEffect(draft, effect, target, trackName, { findEnum,
     || !/^\d{5,24}$/.test(officialBinding.resourceId) || officialBinding.effectId !== officialBinding.resourceId || !Array.isArray(officialBinding.controls))) throw new Error('Invalid official native-effect binding.');
   const resourceId = officialBinding?.resourceId || entry.resource_id, effectId = officialBinding?.effectId || entry.effect_id;
   const result = addEffect(draft, { slug: effect.slug, start: Math.round(effect.start * 1e6), duration: Math.round(effect.duration * 1e6),
-    intensity: effect.intensity, params: officialBinding ? [] : effect.params, bindSegmentId: target, trackName,
+    intensity: effect.intensity, params: officialBinding ? [] : effect.params, ...(composite ? {} : { bindSegmentId: target }), trackName,
     // The CLI's inline starter catalog takes precedence over enums. Pin the
     // exact reviewed scene resource; do not validate one ID and write another.
     ...(scene ? { resourceId, effectId } : {}) });
@@ -63,6 +65,19 @@ export function writeCatalogEffect(draft, effect, target, trackName, { findEnum,
     if (officialBinding.localPath) material.path = officialBinding.localPath;
     material.name = entry.name;
   }
-  return { ...result, operation: 'native.effect', slug: effect.slug, resourceId,
+  return { ...result, operation: 'native.effect', slug: effect.slug, resourceId, scope: composite ? 'composition' : 'segment',
     effectId, catalogFree: true, pluginApplied: Boolean(officialBinding), controls: material.adjust_params, nativePlaybackVerified: false };
+}
+
+/** A global optical treatment may not spill onto an unrelated original layer. */
+export function assertCompositeEffectScope(effects, original, selectedId) {
+  const selected = original.tracks.flatMap(t => t.segments || []).find(s => s.id === selectedId);
+  if (selectedId && !selected) throw new Error('Missing selected segment for effect scope.');
+  const offset = selected?.target_timerange.start || 0;
+  for (const effect of effects.filter(e => e.target === 'composition')) {
+    const start = offset + Math.round(effect.start * 1e6), end = start + Math.round(effect.duration * 1e6);
+    const unrelated = original.tracks.filter(t => t.type !== 'audio').flatMap(t => t.segments || []).some(s => s.id !== selectedId &&
+      s.target_timerange.start < end && s.target_timerange.start + s.target_timerange.duration > start);
+    if (unrelated) throw new Error('Composition effect overlaps unrelated original content. Use isolated layer controls or a separate candidate composition.');
+  }
 }

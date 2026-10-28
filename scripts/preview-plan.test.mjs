@@ -1,6 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { preparePreviewPlan } from '../src/server/editing/preview-plan.mjs';
+import { motionComposition } from '../src/server/editing/motion-preview.mjs';
+import vm from 'node:vm';
+
+test('delayed layers have their native pose before the first rounded video frame becomes visible', () => {
+  const html = motionComposition([{ kind: 'photo', start: .066667, file: 'cloud.png', width: 460, height: 360,
+    segment: { target_timerange: { duration: 33333 }, clip: { transform: { x: -1.38, y: .54 }, scale: { x: .639, y: .639 }, alpha: 1 } } }],
+  { width: 540, height: 960, duration: 2.2, fps: 30 });
+  const at = 2 / 30, poses = new Map();
+  const tl = { set(id, pose, time) { if (time <= at) poses.set(id, pose); return tl; }, to() { return tl; } };
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+  vm.runInNewContext(script, { gsap: { timeline: () => tl }, window: {} });
+  assert.ok(poses.has('#motion-0'), 'pose must be initialized before visibility rounding at frame 2');
+  assert.equal(poses.get('#motion-0').x, -372.59999999999997);
+  assert.equal(poses.get('#motion-0').scaleX, .639);
+});
 
 test('proxy preserves native stacking even when foreground starts first and uses an explicit Windows font', () => {
   const graph = '[v0]null[vout];[1:v]null[ovsrc0];[vout][ovsrc0]overlay=x=0[ovout0];[2:v]null[ovsrc1];[ovout0][ovsrc1]overlay=x=0[ovout1];[ovout1]drawtext=text=hello[vt0]';

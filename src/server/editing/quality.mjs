@@ -1,5 +1,30 @@
 const findingKey = finding => JSON.stringify([finding.component, finding.timeSeconds, finding.expected, finding.observed]);
 
+/** Prefer actual native pixels for the expensive pair of model assessments. */
+export function needsDesignReview(nativeAvailable, measuredDefects) {
+  return !nativeAvailable || measuredDefects.length > 0;
+}
+
+export function requireAudioEvidence(findings, hasGeneratedAudio, hasMixReport) {
+  if (!hasGeneratedAudio || hasMixReport) return findings;
+  return { ...findings, decision: findings.defects.length ? 'revise' : 'blocked',
+    unknowns: [...new Set([...findings.unknowns, 'The generated audio mix has no rendered signal evidence; its volume curves, clipping and silence remain unverified.'])] };
+}
+
+/** Build-time model notes cannot describe evidence produced later by the controller. */
+export function candidateStatusNotes({ verified, previewReady, quality }) {
+  const notes = [previewReady ? 'Approximate preview is available.' : 'Preview is unavailable.'];
+  const count = quality?.defects?.length || 0;
+  if (count) notes.push(`${count} measured defect${count === 1 ? '' : 's'} still require correction.`);
+  if (verified && quality?.decision === 'ready' && quality.nativeVerified) {
+    notes.push('Candidate verified. Your approval is required before applying it.');
+  } else {
+    notes.push(quality?.nativeVerified ? 'Required quality checks remain incomplete.' : 'Native CapCut output has not been verified.');
+  }
+  notes.push('The original project remains unchanged.');
+  return notes.join(' ');
+}
+
 /** Reviewers cannot erase each other's findings or turn missing evidence into a pass. */
 export function combineReviews(reports, techniques, nativeVerified, candidateDigest, unresolvedRequirements = []) {
   const defects = new Map(), unknowns = new Set(), assessments = [];

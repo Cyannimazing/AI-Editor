@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { materialSearchArguments, materialSearchTool, materialSearchItems, capcutAuthorizationUrl } from '../src/server/capcut/plugin-policy.mjs';
-import { inspectEffectResource, effectBundleFiles, selectOfficialEffect } from '../src/server/capcut/effect-resources.mjs';
+import { inspectEffectResource, effectBundleFiles, selectOfficialEffect, effectCacheRoot } from '../src/server/capcut/effect-resources.mjs';
+import { integrationCapabilities, effectRoutingReceipt } from '../src/server/capcut/integration-policy.mjs';
 import { packageJobResources } from '../src/server/capcut/package-resources.mjs';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -10,6 +11,24 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { findExecutable } from '../src/server/platform/runtime.mjs';
+
+test('effect routing distinguishes official application, missing resources and local fallback', () => {
+  const capabilities = integrationCapabilities({ materialSearch: true, localBuilder: true });
+  const effects = [{ slug: 'one', target: 'source', start: 0, duration: 1 }, { slug: 'two', target: 'source', start: 1, duration: 1 }];
+  const receipt = effectRoutingReceipt(effects, [{ index: 0, resourceId: '123456', controlsVerified: false, resourceFiles: [] }], capabilities);
+  assert.equal(receipt.discovery, 'official-capcut-plugin'); assert.equal(receipt.autoExport, false);
+  assert.equal(receipt.effects[0].provider, 'official-capcut-local-builder-and-desktop-adapter');
+  assert.equal(receipt.effects[0].controlsVerified, false); assert.equal(receipt.effects[0].playbackVerified, false);
+  assert.match(receipt.effects[1].reason, /No unambiguous/);
+  assert.equal(integrationCapabilities({ materialSearch: false, localBuilder: false }).discovery, 'installed-local-catalog');
+});
+
+test('native effect cache paths preserve Windows and macOS path semantics and overrides', () => {
+  assert.equal(effectCacheRoot('darwin', {}, '/Users/Test User'), '/Users/Test User/Movies/CapCut/User Data/Cache/effect');
+  assert.equal(effectCacheRoot('win32', { LOCALAPPDATA: 'C:\\Users\\Test User\\AppData\\Local' }, 'ignored'), 'C:\\Users\\Test User\\AppData\\Local\\CapCut\\User Data\\Cache\\effect');
+  assert.equal(effectCacheRoot('darwin', { AI_EDITOR_CAPCUT_EFFECT_CACHE: '/Volumes/Media/CapCut effects' }, '/Users/Test'), '/Volumes/Media/CapCut effects');
+  assert.throws(() => effectCacheRoot('darwin', { AI_EDITOR_CAPCUT_EFFECT_CACHE: '../untrusted' }), /absolute/);
+});
 
 const catalogEffect = { name: 'Motion Blur', slug: 'motion-blur', is_vip: false, md5: '167deb8c5b35d5a3097cb107693c62c3', resource_id: '7011333202614686210' };
 const officialEffect = { title: 'Motion Blur', resource_id: '7399468627948440838', stdraft_uri: 'vimo://7399468627948440838' };
@@ -45,6 +64,22 @@ test('automatic effect selection rejects paid, ambiguous and mismatched identiti
   assert.equal(selectOfficialEffect(catalogEffect, [officialEffect, { ...officialEffect, resource_id: '123456' }]), null);
   assert.equal(selectOfficialEffect(catalogEffect, [{ ...officialEffect, title: 'Different effect' }]), null);
   assert.throws(() => selectOfficialEffect(catalogEffect, [{ ...officialEffect, stdraft_uri: 'vimo://different' }]), /identity/);
+});
+
+test('official material captions reach the planner as descriptions without losing resource identity', () => {
+  // The protected CapCut font search returns its visual description as caption.
+  const item = { resource_id: '7317175475195875841', stdraft_uri: 'vimo://7317175475195875841',
+    title: 'ZY Resolve', caption: 'Bold geometric sans-serif display font.', cover_url: 'https://example.invalid/thumbnail' };
+  for (const result of [{ structuredContent: { items: [item] } }, { content: [{ type: 'text', text: JSON.stringify({ items: [item] }) }] }]) {
+    assert.deepEqual(materialSearchItems(result), [{ resource_id: item.resource_id, stdraft_uri: item.stdraft_uri,
+      title: item.title, caption: item.caption, description: item.caption }]);
+  }
+  const described = materialSearchItems({ structuredContent: { items: [{ ...item, description: 'Explicit provider description.', is_vip: true }] } })[0];
+  assert.equal(described.description, 'Explicit provider description.');
+  assert.equal(described.is_vip, true, 'visual descriptions must not overwrite paid-resource metadata');
+  const malformed = materialSearchItems({ structuredContent: { items: [{ ...item, caption: { tool: 'execute' } }] } })[0];
+  assert.equal(Object.hasOwn(malformed, 'caption'), false);
+  assert.equal(Object.hasOwn(malformed, 'description'), false);
 });
 
 test('native metadata supplies real control names and packages the complete local effect dependency', async t => {

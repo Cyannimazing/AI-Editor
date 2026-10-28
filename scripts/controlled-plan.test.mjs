@@ -28,6 +28,32 @@ test('compiler keeps words as data and emits native scale-axis keyframes', () =>
   assert.equal(spec.tracks[0].items[0].path, '/trusted/source.mp4');
 });
 
+test('overlapping editable text copies compile onto independent native tracks', () => {
+  const plan = sample();
+  plan.texts.push({ ...plan.texts[0], x: .1, opacity: .3 });
+  const spec = compileControlledSpec(plan, { source: '/trusted/source.mp4', duration: 1, width: 640, height: 360 });
+  const tracks = spec.tracks.filter(track => track.type === 'text');
+  assert.equal(tracks.length, 2);
+  assert.equal(new Set(tracks.map(track => track.name)).size, 2);
+  assert.deepEqual(tracks.map(track => track.items[0].ref), ['text-0', 'text-1']);
+  assert.ok(tracks.every(track => track.items.length === 1));
+});
+
+test('sequential captions reuse tracks while concurrent text keeps its declared stacking order', () => {
+  const plan = sample(), base = plan.texts[0];
+  plan.texts = Array.from({ length: 200 }, (_, start) => ({ ...base, start, duration: 1 }));
+  let spec = compileControlledSpec(plan, { source: '/trusted/source.mp4', duration: 200, width: 640, height: 360 });
+  assert.equal(spec.tracks.filter(track => track.type === 'text').length, 1);
+  assert.equal(spec.tracks.find(track => track.type === 'text').items.length, 200);
+  plan.texts = [0, 1, 2, 4].map(start => ({ ...base, start, duration: 2 }));
+  spec = compileControlledSpec(plan, { source: '/trusted/source.mp4', duration: 6, width: 640, height: 360 });
+  assert.deepEqual(spec.tracks.filter(track => track.type === 'text').map(track => track.items.map(item => item.ref)),
+    [['text-0', 'text-3'], ['text-1'], ['text-2']]);
+  plan.texts = [{ ...base, start: .0000004, duration: 1.0000004 }, { ...base, start: 1.0000004, duration: 1 }];
+  spec = compileControlledSpec(plan, { source: '/trusted/source.mp4', duration: 3, width: 640, height: 360 });
+  assert.equal(spec.tracks.filter(track => track.type === 'text').length, 2, 'match compiler rounding for a one-microsecond overlap');
+});
+
 test('local vector generation accepts reusable shapes and rejects scripts, external resources and baked words', () => {
   const asset = { id: 'decorative-art', width: 512, height: 256, svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 256"><path d="M20 20 H490 V230 H20 Z" fill="#FFFFFF"/></svg>' };
   assert.equal(validateVectorAsset(asset).id, asset.id);
@@ -64,6 +90,7 @@ test('trusted compiler creates an editable native candidate from a validated pla
     effects: [{ slug: 'chromatic', target: 'source', start: 0.1, duration: 0.4, intensity: 0.5, params: [] },
       { slug: 'motion-blur', target: 'overlay-0', start: 0.1, duration: 0.4, intensity: 0.3, params: [] }], resourceQueries: [] };
   expanded.texts[0].text = 'Editable';
+  expanded.texts.push({ ...expanded.texts[0], x: .1, opacity: .3 });
   const effectFolder = join(job, 'native-resources', '7399468627948440838');
   await mkdir(effectFolder, { recursive: true });
   await writeFile(join(effectFolder, 'extra.json'), '{}');
@@ -84,7 +111,8 @@ test('trusted compiler creates an editable native candidate from a validated pla
   await assert.rejects(validateNativeCandidate({ ...validation, manifest: { ...manifest, limitations: ['Native construction failed.'] } }), /Native construction failed/);
   const photo = built.materials.videos.find(material => material.path.endsWith('decorative-art.png'));
   assert.ok(photo, 'generated art is an independent image dependency');
-  assert.equal(built.materials.texts.length, 1, 'words remain editable text');
+  assert.equal(built.materials.texts.length, 2, 'simultaneous words remain separate editable text');
+  assert.equal(built.tracks.filter(track => track.type === 'text' && track.segments.length).length, 2);
   const nativeStyle = JSON.parse(built.materials.texts[0].content).styles[0];
   assert.equal(nativeStyle.bold, true);
   if (availableTextFonts()[0]) assert.equal(nativeStyle.font.path, availableTextFonts()[0].path);
@@ -99,11 +127,12 @@ test('trusted compiler creates an editable native candidate from a validated pla
   assert.equal(official.path, effectFolder);
   assert.deepEqual(official.adjust_params.map(control => [control.name, control.value]), [['effects_adjust_horizontal_shift', 0.7], ['effects_adjust_intensity', 0.85]], 'actual plugin control fields reach the editable native component');
   const lint = await run(process.execPath, [join(root, 'toolchain', 'node_modules', 'capcut-cli', 'dist', 'index.js'), 'lint', draftPath, '--json'], { cwd: root, timeout: 30000, windowsHide: true });
+  assert.ok(!JSON.parse(lint.stdout).issues?.some(issue => issue.code === 'caption-overlap'));
   assert.equal(JSON.parse(lint.stdout).summary.errors, 0);
   await run(process.execPath, [join(root, 'scripts', 'render-preview.mjs'), job, draftPath], { cwd: root, timeout: 30000, windowsHide: true });
   const proxy = JSON.parse(await readFile(join(job, 'preview-plan.json'), 'utf8'));
   assert.equal(proxy.audioSegments, 1, 'embedded source audio is included in the preview');
-  assert.equal(proxy.textOverlays, 1);
+  assert.equal(proxy.textOverlays, 2);
   assert.equal(proxy.overlaySegments, 1);
   assert.equal(proxy.previewKind, 'approximate');
   const output = JSON.parse((await run(mediaTool('ffprobe'), ['-v', 'error', '-show_streams', '-show_format', '-of', 'json', join(job, 'preview.mp4')], { windowsHide: true })).stdout);
@@ -111,6 +140,34 @@ test('trusted compiler creates an editable native candidate from a validated pla
   assert.ok(Math.abs(Number(output.format.duration) - 1) < 0.05);
   await run(process.execPath, [join(root, 'scripts', 'compile-controlled-edit.mjs'), job, draftPath, '2'], { cwd: root, timeout: 30000, windowsHide: true });
   assert.equal(loadDraft(draftPath).draft.materials.videos.find(material => material.path.endsWith('decorative-art.png')).path, photo.path, 'unchanged assets reuse the checked cached artifact');
+  const globalPlan = structuredClone(expanded);
+  globalPlan.effects.forEach(effect => effect.target = 'composition');
+  const compileComposition = async round => {
+    await writeFile(join(job, `controlled-plan-${round}.json`), JSON.stringify(globalPlan));
+    await writeFile(join(job, `native-effect-bindings-${round}.json`), await readFile(join(job, 'native-effect-bindings-2.json')));
+    await run(process.execPath, [join(root, 'scripts/compile-controlled-edit.mjs'), job, draftPath, String(round)], { cwd: root, timeout: 30000, windowsHide: true });
+    const candidate = loadDraft(draftPath).draft;
+    const receipt = JSON.parse(await readFile(join(job, `execution-${round}.json`), 'utf8'));
+    return { candidate, manifest: JSON.parse(await readFile(join(job, `manifest-${round}.json`), 'utf8')),
+      compositionEffectIds: receipt.operations.filter(op => op.scope === 'composition').map(op => op.materialId) };
+  };
+  const whole = await compileComposition(3);
+  await assert.rejects(validateNativeCandidate({ ...validation, ...whole, compositionEffectIds: [] }), /Isolate or bind/);
+  await validateNativeCandidate({ ...validation, ...whole });
+  assert.ok(whole.candidate.materials.video_effects.every(effect => effect.apply_target_type === 2));
+  const selectedOriginal = structuredClone(result);
+  selectedOriginal.tracks = selectedOriginal.tracks.filter(track => track.type === 'video');
+  const clipId = selectedOriginal.tracks.find(track => track.segments.length).segments[0].id;
+  await writeFile(join(job, 'original-draft.json'), JSON.stringify(selectedOriginal));
+  await writeFile(join(job, 'spec.json'), JSON.stringify({ source: { path: source, duration: 1, width: 640, height: 360, fps: 30, clipId } }));
+  const scoped = await compileComposition(4);
+  await validateNativeCandidate({ ...validation, ...scoped, original: selectedOriginal, clipId });
+  const unrelated = structuredClone(result.tracks.find(track => track.type === 'text'));
+  const conflictingOriginal = { ...selectedOriginal, tracks: [...selectedOriginal.tracks, unrelated] };
+  await writeFile(join(job, 'original-draft.json'), JSON.stringify(conflictingOriginal));
+  const beforeRefusal = await readFile(join(draftPath, 'draft_content.json'), 'utf8');
+  await assert.rejects(compileComposition(4), /unrelated original/);
+  assert.equal(await readFile(join(draftPath, 'draft_content.json'), 'utf8'), beforeRefusal);
 });
 
 test('candidate identity updates every active timeline mirror and preserves inactive timelines and envelopes', async t => {

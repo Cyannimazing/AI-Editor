@@ -24,7 +24,7 @@ Run structural/path checks and prepare a preview. Separate reviewer and manager 
 
 Allow one build plus at most three corrections within 30 minutes. Stop on repeated identical failure or unavailable account/model/security capabilities. Standard speed is used, with one permitted high-reasoning Sol escalation. Usage savings remain unmeasured.
 
-The trusted native adapter must open the exact candidate, capture/export actual output, inspect editable controls and bind evidence to revision and platform/CapCut version. Queuing an export shortcut is insufficient. This adapter is unvalidated, so approval remains blocked.
+The trusted native adapter opens the exact candidate, inspects editable controls and captures its player at checked timeline positions, binding evidence to revision and platform/CapCut version. Normal jobs never export. Missing player/audio evidence and unsupported layouts remain unverified. See `native-player-verification.md` for current platform scope.
 
 ## Approve and commit
 

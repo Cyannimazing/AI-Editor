@@ -4,6 +4,9 @@ import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+import { readdir } from 'node:fs/promises';
 import { authorize, sessionResponse, boundedBody } from '../src/server/security/http.ts';
 import { directoryDigest, transactionalWrite } from '../src/server/editing/transaction.ts';
 import { acquireLock } from '../src/server/editing/lock.ts';
@@ -65,4 +68,39 @@ test('resolved paths reject siblings and preview range reads are exact', async t
   assert.equal(response.status, 206); assert.equal(await response.text(), '2345');
   const invalid = await mediaResponse(request('/preview', { headers: { range: 'bytes=20-' } }), path);
   assert.equal(invalid.status, 416);
+});
+
+test('a process crash mid-write retains a complete backup and blocks a subsequent writer', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'ai-editor-crash-')); t.after(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project'), journals = join(root, 'journals'); await mkdir(project);
+  await writeFile(join(project, 'draft.json'), 'original');
+  await writeFile(join(project, 'media.bin'), 'untouched media');
+  const digest = await directoryDigest(project), script = join(root, 'crash.mjs');
+  const transactionUrl = pathToFileURL(join(process.cwd(), 'src/server/editing/transaction.ts')).href;
+  await writeFile(script, `import {transactionalWrite} from ${JSON.stringify(transactionUrl)};
+    import {writeFile} from 'node:fs/promises';
+    await transactionalWrite({ project: ${JSON.stringify(project)}, expectedDigest: ${JSON.stringify(digest)}, journalRoot: ${JSON.stringify(journals)},
+      write: async () => { await writeFile(${JSON.stringify(join(project, 'draft.json'))}, 'partial write'); process.exit(77); }, validate: async () => {} });`);
+  const child = spawn(process.execPath, [script], { windowsHide: true, stdio: 'ignore' });
+  const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
+  assert.equal(code, 77);
+  const names = (await readdir(journals)).filter(name => name.endsWith('.json'));
+  assert.equal(names.length, 1);
+  const record = JSON.parse(await readFile(join(journals, names[0]), 'utf8'));
+  assert.equal(record.phase, 'committing');
+  assert.equal(await directoryDigest(record.backup), digest);
+  let wrote = false;
+  await assert.rejects(transactionalWrite({ project, journalRoot: journals, expectedDigest: await directoryDigest(project),
+    write: async () => { wrote = true; }, validate: async () => {} }), /recovery inspection/);
+  assert.equal(wrote, false);
+});
+
+test('a permission failure after a partial write restores the complete project', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'ai-editor-permission-')); t.after(() => rm(root, { recursive: true, force: true }));
+  const project = join(root, 'project'); await mkdir(project); await writeFile(join(project, 'draft.json'), 'original');
+  const digest = await directoryDigest(project);
+  await assert.rejects(transactionalWrite({ project, journalRoot: join(root, 'journals'), expectedDigest: digest,
+    write: async () => { await writeFile(join(project, 'draft.json'), 'partial'); throw Object.assign(new Error('Permission denied'), { code: 'EACCES' }); },
+    validate: async () => {} }), /complete original was restored/);
+  assert.equal(await directoryDigest(project), digest);
 });

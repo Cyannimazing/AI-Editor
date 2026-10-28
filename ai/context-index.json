@@ -2,10 +2,11 @@
   "version": 1,
   "shared": ["contract.md", "tools.md", "workflows/editing.md"],
   "roles": {
+    "planner": [],
     "editor": ["tools/capcut-cli.md", "tools/assets-and-motion.md", "tools/media-and-audio.md", "tools/official-capcut.md"],
     "motion": ["tools/capcut-cli.md", "tools/assets-and-motion.md", "tools/official-capcut.md"],
-    "captions": ["tools/capcut-cli.md", "tools/media-and-audio.md"],
-    "audio": ["tools/media-and-audio.md"],
+    "captions": ["tools/capcut-cli.md", "tools/media-and-audio.md", "tools/official-capcut.md"],
+    "audio": ["tools/media-and-audio.md", "tools/official-capcut.md"],
     "reviewer": ["workflows/verification.md"],
     "manager": ["workflows/verification.md"]
   }

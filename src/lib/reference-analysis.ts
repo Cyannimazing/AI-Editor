@@ -19,7 +19,8 @@ export async function runCodexStream(executable: string, args: string[], cwd: st
   onLine: (line: string) => void, timeoutMs = 600_000, signal?: AbortSignal,
   role: Role = "editor", candidate?: string, highReasoning = false) {
   const config = roles[role];
-  if (!codeModeHost()) throw new Error('Codex’s local tool host is missing. Install or update the official Codex app/CLI before starting MCP editing.');
+  const planning = role === 'planner';
+  if (!planning && !codeModeHost()) throw new Error('Codex’s local tool host is missing. Install or update the official Codex app/CLI before starting MCP editing.');
   void candidate;
   const models = await availableModels();
   const model = models.find(item => item.id === config.model || item.model === config.model);
@@ -30,10 +31,10 @@ export async function runCodexStream(executable: string, args: string[], cwd: st
   const context = await workerContext(role);
   await writeFile(join(cwd, `context-manifest-${role}.json`), JSON.stringify(context.manifest, null, 2));
   onLine(`Loaded ${role} context: ${context.manifest.sources.length} guides and the inspected local tool inventory.`);
-  onLine(`${role}: ${config.model}, ${effort} reasoning. Local MCP tools ${role === 'editor' ? 'inspect evidence and build the candidate' : 'inspect evidence without changing the candidate'}.`);
+  onLine(`${role}: ${config.model}, ${effort} reasoning. ${planning ? 'Planning the selected scope; no editing tools.' : `Local MCP tools ${role === 'editor' ? 'inspect evidence and build the candidate' : 'inspect evidence without changing the candidate'}.`}`);
   await runCancellableProcess(executable, [subcommand, "--ignore-user-config", "--ignore-rules", "--strict-config",
-    ...codexTransportArgs(), ...structuredPolicyArgs(cwd, process.platform, true), ...editingMcpArgs(cwd, role),
+    ...codexTransportArgs(), ...structuredPolicyArgs(cwd, process.platform, !planning), ...(planning ? [] : editingMcpArgs(cwd, role)),
     "--model", config.model, "--config", `model_reasoning_effort="${effort}"`, "--config", 'service_tier="default"',
     ...options],
-    { cwd, stdin: `${context.text}\n\nExecution mode: use only the ai_editor local MCP tools to inspect timed evidence and test/edit the candidate. Call inspect_job first. Request individual reference/source/preview frames around important motion boundaries. ${['editor', 'motion'].includes(role) ? 'Test the complete plan with evaluate_keyframes before submitting it.' : 'Inspect relevant written components with inspect_timeline; do not invent a complete plan from a partial specialist view.'} ${role === 'editor' ? 'You may apply_edit_plan to build native candidate layers/curves, then inspect_timeline to verify the actual saved controls. The host still resolves effects and independently reviews the final plan.' : 'Your tools are read-only; propose corrections for the lead editor.'} Do not use shell, patch, unrelated plugins, arbitrary files, desktop operations or paid services. Return the required structured JSON as your final answer.\n\n${prompt}`, signal, timeoutMs, onLine, env: codexEnvironment() });
+    { cwd, stdin: `${context.text}\n\n${planning ? 'Execution mode: project routing only. Tools are unavailable in this stage. Use the provided inventory and evidence to assign the requested work; do not attempt the editing workflow yet.' : `Execution mode: use only the ai_editor local MCP tools to inspect timed evidence and test/edit the candidate. Call inspect_job first. Request individual reference/source/preview frames around important motion boundaries. ${['editor', 'motion'].includes(role) ? 'Test the complete plan with evaluate_keyframes before submitting it.' : 'Inspect relevant written components with inspect_timeline; do not invent a complete plan from a partial specialist view.'} ${role === 'editor' ? 'You may apply_edit_plan to build native candidate layers/curves, then inspect_timeline to verify the actual saved controls. The host still resolves effects and independently reviews the final plan.' : 'Your tools are read-only; propose corrections for the lead editor.'}`} Do not use shell, patch, unrelated plugins, arbitrary files, desktop operations or paid services. Return the required structured JSON as your final answer.\n\n${prompt}`, signal, timeoutMs, onLine, env: codexEnvironment() });
 }

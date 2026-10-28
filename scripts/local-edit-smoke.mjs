@@ -4,6 +4,7 @@ import { promisify } from 'node:util';
 import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { mediaTool } from '../src/server/platform/runtime.mjs';
+import { smokeOutcome } from './smoke-outcome.mjs';
 const base = 'http://localhost:3000', run = promisify(execFile);
 const root = join(process.cwd(), '.local-tools', 'smoke'); await mkdir(root, { recursive: true });
 const folder = await mkdtemp(join(root, 'edit-')), source = join(folder, 'test-footage.mp4');
@@ -23,7 +24,7 @@ const created = await create.json(); if (!create.ok) throw new Error(created.err
 const body = new FormData(); body.set('projectId', created.projectId);
 body.set('rawVideo', new Blob([await readFile(source)], { type: 'video/mp4' }), 'test-footage.mp4');
 if (supplied) body.set('reference', new Blob([await readFile(join(supplied, 'reference.mp4'))], { type: 'video/mp4' }), 'reference.mp4');
-body.set('prompt', supplied ? 'Recreate the editing techniques in the reference on this footage. Measure both videos. Match composition, graphic shape, exact text, entrance motion, keyframes, optical treatments and pacing. Generate required decorative assets locally and retain their sources; keep native text and controls editable. Have specialists check the measurements, compare the result, and correct visible mismatches. Do not declare a technique implemented just because it is named in a plan. No paid services or media uploads.' : 'Keep this 3-second test clip and audio duration unchanged. Add an editable native zoom from scale 1 at 0 seconds to 1.1 at 3 seconds, linear. Add editable white text reading exactly AI-Editor test, size 36 pixels, centered, for all 3 seconds. Do not add any other changes.');
+body.set('prompt', supplied ? 'Recreate the editing techniques in the reference on this footage. Measure both videos. Match composition, graphic shape, exact text, entrance motion, keyframes, optical treatments and pacing. Pay particular attention to sustained slow zoom: keep it moving through the intended interval without repeated ease-in/out stops. Research and compare CapCut optical resources for the observed smears, ghosting and changing light/exposure; do not assume one static blur reproduces them. Choose the correct layer or composition scope. Generate required decorative assets locally and retain their sources; keep native text and controls editable. Have specialists check the measurements, compare the actual native result, and correct visible mismatches. Do not declare a technique implemented just because it is named in a plan. No paid services or media uploads.' : 'Keep this 3-second test clip and audio duration unchanged. Add an editable native zoom from scale 1 at 0 seconds to 1.1 at 3 seconds, linear. Add editable white text reading exactly AI-Editor test, size 36 pixels, centered, for all 3 seconds. Do not add any other changes.');
 if (effectSmoke) body.set('prompt', 'Keep this 3-second clip duration unchanged. Apply the free native Motion Blur video effect to the source for all 3 seconds. Use the connected official CapCut plugin automatically to find and apply it, with its actual default controls. Add editable linear native X position keyframes at 0 seconds = -0.1 and 3 seconds = 0.1. No text, decorative assets, audio changes or other effects. No paid services or uploads. Inspect the construction and preview; distinguish native effects omitted by the preview from visible defects.');
 const start = await fetch(`${base}/api/apply-native`, { method: 'POST', headers, body });
 const job = await start.json(); if (!start.ok) throw new Error(job.error);
@@ -38,7 +39,10 @@ for (;;) {
   if (!['running', 'cancelling', 'committing'].includes(data.status)) {
     await writeFile(join(folder, 'result.json'), JSON.stringify(data));
     console.log(JSON.stringify({ status: data.status, error: data.error, result: data.result, folder }));
-    if (!data.result) process.exitCode = 1;
+    const acceptance = smokeOutcome(data);
+    await writeFile(join(folder, 'acceptance.json'), JSON.stringify(acceptance));
+    console.log(JSON.stringify(acceptance));
+    process.exitCode = acceptance.exitCode;
     break;
   }
   await new Promise(done => setTimeout(done, 2000));

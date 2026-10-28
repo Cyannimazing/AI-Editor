@@ -1,12 +1,12 @@
 # AI-Editor
 
-A local editing workspace powered by the user's signed-in ChatGPT Codex CLI. It prepares a separate CapCut candidate and requires user approval before applying a verified edit.
+A local editing workspace powered by your signed-in ChatGPT Codex CLI. Select your CapCut project, describe the changes, optionally add a reference, and review editable layers, text, effects, audio and keyframes. Approve the result to save it back to the project you selected.
 
-**Development status:** local MCP construction/readback and protected-file denial have been exercised on Windows. This is not a finished release. Automatic native verification and real macOS acceptance remain open. See [the audit addendum](docs/audit-remediation.md) and [MCP investigation](docs/local-mcp-editing-research.md).
+**Windows and macOS testing build.** Platform setup, local tool discovery and native desktop adapters are included. Follow the steps below for your first test. See [the audit response and test evidence](docs/independent-audit-response-2026-10-28.md) for the checks behind this build.
 
 ## Set up the application
 
-This is a source checkout running on your computer, not a packaged Windows installer or Mac app. Use the steps below on Windows or macOS. Windows has been exercised locally; Mac path/setup checks are automated, but a real MacBook editing trial is still required.
+This is a source checkout running on your computer. Use native PowerShell on Windows 10/11 or Terminal on **macOS 13.5 or newer**, using a macOS version still supported by Apple. The Mac minimum follows [Node 24's requirements](https://github.com/nodejs/node/blob/v24.x/BUILDING.md#platform-list). Install native ARM64 tools on Apple Silicon and x64 tools on Intel.
 
 ### 1. Install the prerequisites once
 
@@ -14,7 +14,7 @@ This is a source checkout running on your computer, not a packaged Windows insta
 | --- | --- | --- |
 | Node.js | Install **Node.js 24.x** from [Node.js](https://nodejs.org/en/download). | Install **Node.js 24.x** for your Mac: ARM64 for Apple Silicon, x64 for Intel. |
 | Codex | Install the official [Codex app/CLI](https://developers.openai.com/codex/quickstart), including its `codex-code-mode-host`. | Same requirement. System and per-user Codex app locations are checked. |
-| CapCut desktop | Install [CapCut desktop](https://www.capcut.com/tools/desktop-video-editor), open it once, and save a test project. | Same requirement. The default application location is `/Applications/CapCut.app`. |
+| CapCut desktop | Install [CapCut desktop](https://www.capcut.com/tools/desktop-video-editor), open it once, and save a test project. | Same requirement. Both `/Applications/CapCut.app` and `~/Applications/CapCut.app` are discovered. |
 | Local media tools | Install [Python 3.13](https://www.python.org/downloads/) (3.10–3.13 supported); enable its PATH option. FFmpeg installs automatically if missing. | Install [Homebrew](https://brew.sh/) if compatible Python and FFmpeg are not already available. Setup uses it to install missing FFmpeg/Python 3.13. |
 | Downloading this code | Install Git, or download and extract the repository ZIP. | Same requirement. |
 
@@ -53,12 +53,25 @@ Only compatible packages from the lockfiles are installed; package lifecycle scr
 ### 4. Try an edit
 
 1. Wait for setup to finish, then choose **Open workspace**.
-2. Select a saved CapCut project, or create a disposable test project and add footage.
-3. Enter your editing instructions. A video, image or public-link reference is optional.
+2. Select the saved CapCut project you want to update. Leave **Entire project** selected, or choose **Selected clips** for a checklist with filenames, tracks and time ranges. An empty test project needs footage.
+3. Enter your editing instructions. A video, image or public-link reference is optional. Adding a reference suggests a plain-language prompt you can change.
 4. Run the edit. The app builds a candidate, checks it and requests corrections when needed.
-5. Review the app preview and open the **editable test copy** in CapCut to inspect motion, sound and native controls.
+5. Review the result. **Inspect temporary review copy** opens the editable candidate in CapCut. **Apply to [project name]** saves approved changes to your selected project after verification, backup and a conflict check.
 
-Use a test project for the first run. Automatic native CapCut verification is still unfinished, so a successful local preview does not authorize replacing your original project. The app keeps that gate explicit.
+Use a test project for the first run. The app inspects the actual CapCut player without exporting. If the project, frame time or player layout cannot be identified reliably, it explains the problem and retains the candidate for review. A successful approximate preview alone cannot authorize replacing your original project.
+
+### Mac permissions and readiness check
+
+Grant permissions to the app that **starts AI-Editor**, such as Terminal, your IDE or Codex, as named by macOS:
+
+- **Privacy & Security → Accessibility:** controlled CapCut navigation.
+- **Screen & System Audio Recording / Screen Recording:** player frame inspection; this workflow does not record microphone or system audio.
+- **Automation:** allow System Events and CapCut when prompted.
+- **Files and Folders:** allow your selected workspace/media locations when requested.
+
+Use the add button if the launcher is not listed in Accessibility or Screen Recording. Restart the launcher if macOS requests it. Keep the desktop unlocked and CapCut visible and in English during inspection. Full Disk Access and disabling Gatekeeper are not required. See [Apple's recording permissions guide](https://support.apple.com/guide/mac-help/control-access-screen-system-audio-recording-mchld6aa7d23/mac) and [Automation guide](https://support.apple.com/en-nz/guide/mac-help/mchl108e1718/mac).
+
+After setup, run `pnpm check:setup` to check prerequisites without editing a project. On Mac, `pnpm check:setup --permissions` also checks Accessibility and Screen Recording. Resolve reported items, then resume setup in the app. On a memory-constrained MacBook, begin with a short clip and close other heavy applications.
 
 ### Common setup problems
 
@@ -69,7 +82,7 @@ Use a test project for the first run. Automatic native CapCut verification is st
 - **CapCut/project not detected:** open CapCut once and save a project. Custom locations can be supplied with `AI_EDITOR_CAPCUT_PATH` and `AI_EDITOR_DRAFTS_ROOT` before starting the app. On macOS the application override points to the `.app` bundle; on Windows it points to `CapCut.exe`.
 - **Mac asks for permission to quit/open CapCut:** review the macOS Automation prompt for the app/terminal you are using. Desktop automation permissions are separate from ChatGPT and MCP sign-in. Do not disable Gatekeeper or macOS security protections.
 
-For a production-mode local server, use `pnpm build` followed by `pnpm start`. Both startup modes prepare the editing packages; neither makes automatic native verification complete.
+For a production-mode local server, use `pnpm build` followed by `pnpm start`. Both startup modes prepare the editing packages. Native review checks each candidate separately.
 
 ## Local and optional online features
 
@@ -81,21 +94,25 @@ CapCut sign-in is optional for local draft editing. Its official plugin offers o
 
 For supported native effects, the connected app automatically looks up official resources and uses the installed local CapCut builder before translating its result into an editable desktop candidate. No separate effect search is required from the user. Actual named controls come from matching installed effect bundles; native output verification remains a separate release gate.
 
+When a selected free effect is missing locally, the controller opens a small disposable project so CapCut can download its own resource, then checks the expected package and controls before continuing. Existing downloads are reused. No footage is uploaded or exported, and paid effects remain excluded. CapCut may briefly appear during this step. Automatic acquisition passed Windows tests for Flicker and Strobe; real Mac testing and reference-effect visual acceptance remain pending. See [effect acquisition evidence](docs/native-effect-acquisition.md).
+
 GSAP/HyperFrames, appropriately licensed Remotion and FFmpeg can create local graphics and animation through CLI jobs. Photorealistic image/video generation requires a separately supported model/runtime; no provider is silently enabled.
 
 ## Editing workflow
 
 1. Select a saved CapCut project or create a disposable test project in the app.
-2. Choose a timeline clip or attach raw footage to an empty project. Enter instructions and optionally a reference.
+2. Use **Entire project** to let AI plan changes across the active timeline, or **Selected clips** to check one or more clips by filename, track and time. An empty project still needs footage. Enter instructions; a reference is optional.
 3. The controller checks account/model availability, isolation, tools, source paths and an exclusive lock.
 4. The editor changes an isolated candidate. Structural checks, an approximate design preview and independent reviewer/manager findings guide corrections.
    References transfer techniques to your footage; they do not clone another scene. New raw-footage projects fill the picture before animation. You can focus a run with “Keyframes only”; other runs retain effect and asset tools.
-5. Native verification must inspect actual CapCut output and editable controls. Until that adapter is validated, approval and application remain blocked. A proxy render cannot pass this gate.
+5. File checks inspect editable controls; the controller opens a disposable candidate and inspects CapCut's player at checked timeline times without exporting. Independent reviewers assess the actual frames. Missing native/audio evidence or unsupported layouts remain explicit; an approximate preview cannot pass native verification. See [permissions and evidence limits](docs/native-player-verification.md).
 6. The user approves the exact verified revision. Fresh digest checks, a complete backup and a journal protect the commit. Failed validation restores the whole original directory. Unresolved crash journals block later writes.
+
+The selected project is the save destination. **Apply to [project name]** updates that project after verification and approval; temporary working/review copies are internal safety stages. In multi-clip jobs the planner assigns the prompt once across eligible clips, explains kept clips, and the controller accumulates changes into one candidate. Earlier clips are checked again against the final revision. The displayed design preview is labeled as the last edited clip, not the complete project. Existing non-video layer changes, clip reordering, duration changes and cross-boundary transitions are not enabled by this selection feature; required unsupported operations prevent approval. Multi-clip jobs share the existing 30-minute deadline and cannot yet be saved as reusable recipes.
 
 Defaults: one build plus three corrections, 30-minute deadline, standard model speed and at most one high-reasoning escalation. Stop cancels active tools. Interrupted jobs retain files and are marked interrupted; full automatic continuation is unfinished.
 
-Saved skills are internal reusable editing recipes, not portable CapCut presets. Saving requires a completed reviewed job and the user's Save action.
+Reusable technique saving and reuse are **deferred** for this release. Their workspace controls are removed and new save/reuse requests are disabled. Existing saved data is retained.
 
 ## Code map
 
@@ -124,7 +141,7 @@ pnpm lint
 pnpm build
 ```
 
-These checks include disposable security/setup fixtures and local MCP permission tests without invoking an AI model. Failed permission checks block editing. Unit/build checks do not establish native compatibility or acceptable resource use on an 8 GB MacBook. `scripts/check-worker-sandbox.mjs` is a legacy diagnostic for the earlier shell-sandbox design, not the current MCP readiness check.
+These checks include disposable security/setup fixtures, local MCP permissions, crash recovery and platform discovery. The Mac implementation includes native paths, Intel/Apple Silicon tool discovery, Retina-aware capture and guarded navigation. These automated checks were run on Windows; hardware-specific Mac permissions, playback and resource use need a first-device trial. This testing build does not claim certification for every CapCut version or Mac configuration. `scripts/check-worker-sandbox.mjs` is a legacy diagnostic, not the current MCP readiness check.
 
 For an explicit application trial using your Codex allowance, `node scripts/reference-transfer-smoke.mjs <local-reference.mp4>` creates a disposable project with unrelated footage and submits a motion-transfer request through the normal app API. It retains the job ID under `.local-tools/smoke/`; it does not touch a personal project or open the desktop. See the audit for completed trials and their actual evidence limits.
 

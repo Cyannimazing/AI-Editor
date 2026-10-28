@@ -16,6 +16,10 @@ test('roles load their actual editing guides; reviewers avoid the authoring cata
   assert.ok(editor.text.includes('Create missing assets'));
   assert.ok(reviewer.sources.some(file => file.path === 'workflows/verification.md'));
   assert.ok(!reviewer.sources.some(file => file.path === 'tools/assets-and-motion.md'));
+  for (const role of ['editor', 'motion', 'captions', 'audio']) {
+    const instructions = await loadRoleInstructions(root, role);
+    assert.ok(instructions.sources.some(file => file.path === 'tools/official-capcut.md'), `${role} needs the official operation boundaries`);
+  }
   assert.ok(editor.sources.every(file => /^[0-9a-f]{64}$/.test(file.sha256)));
   await assert.rejects(loadRoleInstructions(root, '../private'), /Unknown/);
 });

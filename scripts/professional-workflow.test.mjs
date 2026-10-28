@@ -1,6 +1,36 @@
 import test from 'node:test';
 import { recoverStructuredReport } from '../src/server/editing/report-recovery.mjs';
 import assert from 'node:assert/strict';
+import { candidateStatusNotes, needsDesignReview, requireAudioEvidence } from '../src/server/editing/quality.mjs';
+import { smokeOutcome } from './smoke-outcome.mjs';
+
+test('native inspection avoids duplicate proxy AI reviews without skipping detected motion defects', () => {
+  assert.equal(needsDesignReview(true, []), false);
+  assert.equal(needsDesignReview(false, []), true);
+  assert.equal(needsDesignReview(true, [{ component: 'source', observed: 'Uncovered edge' }]), true);
+});
+
+test('native model approval cannot erase the missing generated audio evidence gate', () => {
+  const ready = { decision: 'ready', defects: [], unknowns: [], nativeVerified: true };
+  assert.equal(requireAudioEvidence(ready, true, false).decision, 'blocked');
+  assert.equal(requireAudioEvidence(ready, false, false).decision, 'ready');
+  assert.equal(requireAudioEvidence(ready, true, true).decision, 'ready');
+});
+
+test('finished candidate status comes from host evidence and incomplete smoke results never pass', () => {
+  const quality = { decision: 'blocked', nativeVerified: false, defects: [], unknowns: ['Native evidence missing'], techniques: [{ status: 'unverified' }] };
+  const partial = { status: 'blocked', result: { verified: false, quality } };
+  assert.deepEqual(smokeOutcome(partial), { outcome: 'incomplete', exitCode: 2 });
+  assert.deepEqual(smokeOutcome({ status: 'failed' }), { outcome: 'failed', exitCode: 1 });
+  assert.deepEqual(smokeOutcome({ ...partial, result: { ...partial.result, quality: { ...quality, defects: [{}] } } }), { outcome: 'failed', exitCode: 1 });
+  const ready = { status: 'awaiting_approval', result: { verified: true, quality: { ...quality, decision: 'ready', nativeVerified: true, unknowns: [], techniques: [{ status: 'matched' }] } } };
+  assert.deepEqual(smokeOutcome(ready), { outcome: 'passed', exitCode: 0 });
+  assert.deepEqual(smokeOutcome({ ...ready, result: { ...ready.result, quality } }), { outcome: 'incomplete', exitCode: 2 });
+  assert.match(candidateStatusNotes({ verified: false, previewReady: true, quality }), /Approximate preview is available/);
+  assert.match(candidateStatusNotes({ verified: false, previewReady: false, quality }), /Preview is unavailable/);
+  assert.match(candidateStatusNotes({ verified: false, previewReady: true, quality: { ...quality, defects: [{}] } }), /1 measured defect/);
+  assert.doesNotMatch(candidateStatusNotes({ verified: false, previewReady: true, quality }), /Candidate verified/);
+});
 
 test('malformed specialist reports repair within the role, while execution failures do not retry', async () => {
   let calls = 0, notices = 0;
@@ -15,7 +45,7 @@ test('malformed specialist reports repair within the role, while execution failu
 import { addKeyframes } from '../toolchain/node_modules/capcut-cli/dist/decorators.js';
 import { addEffect } from '../toolchain/node_modules/capcut-cli/dist/factory.js';
 import { findEnum } from '../toolchain/node_modules/capcut-cli/dist/enums.js';
-import { writeMotionCurves, writeCatalogEffect, enableNativeCompositing } from '../src/server/editing/native-controls.mjs';
+import { writeMotionCurves, writeCatalogEffect, enableNativeCompositing, assertCompositeEffectScope } from '../src/server/editing/native-controls.mjs';
 import { assertTechniqueContinuity, retainTechniqueContract, combineReviews, qualityAction } from '../src/server/editing/quality.mjs';
 import { nativeCurveValue, motionComposition } from '../src/server/editing/motion-preview.mjs';
 import { specialistAssignments, specialistCacheKey, validateSpecialistReport } from '../src/server/editing/scheduling.mjs';
@@ -111,6 +141,26 @@ test('effect execution pins the exact catalog resource checked for cost', () => 
   assert.equal(draft.materials.video_effects[0].effect_id, entry.effect_id);
   assert.equal(receipt.nativePlaybackVerified, false);
 });
+
+test('an explicitly requested composition effect uses global scope, never an accidental unbound target', () => {
+  const draft = { tracks: [{ id: 'video', segments: [{ id: 'segment' }] }], materials: {} };
+  writeCatalogEffect(draft, { slug: 'chromatic', target: 'composition', start: 0, duration: 1, intensity: .7, params: [] }, null, 'fx', { findEnum, addEffect });
+  assert.equal(draft.materials.video_effects[0].apply_target_type, 2);
+  assert.ok(!draft.materials.video_effects[0].bind_segment_id);
+  assert.throws(() => writeCatalogEffect(draft, { slug: 'chromatic', target: 'source', start: 0, duration: 1, intensity: .7, params: [] }, null, 'bad', { findEnum, addEffect }), /target/);
+});
+
+test('composition scope preserves unrelated original layers and applies the selected timeline offset', () => {
+  const clip = (id, start, duration) => ({ id, target_timerange: { start, duration } });
+  const original = { tracks: [{ type: 'video', segments: [clip('selected', 5e6, 3e6), clip('later', 8e6, 3e6)] },
+    { type: 'text', segments: [clip('caption', 0, 5e6)] }, { type: 'audio', segments: [clip('audio', 0, 20e6)] }] };
+  const effects = [{ target: 'composition', start: 0, duration: 1 }];
+  assert.doesNotThrow(() => assertCompositeEffectScope(effects, original, 'selected'));
+  original.tracks[1].segments[0].target_timerange.duration = 6e6;
+  assert.throws(() => assertCompositeEffectScope(effects, original, 'selected'), /unrelated/);
+  assert.doesNotThrow(() => assertCompositeEffectScope([{ ...effects[0], target: 'source' }], original, 'selected'));
+  assert.doesNotThrow(() => assertCompositeEffectScope(effects, { tracks: [] }));
+});
 test('specialists are selected by editing work and reports cannot invent technique IDs', () => {
   const plan = { source: { volume: 1, keyframes: [] }, texts: [], techniques: [technique] };
   assert.deepEqual(specialistAssignments(plan), []);
@@ -119,6 +169,19 @@ test('specialists are selected by editing work and reports cannot invent techniq
   assert.deepEqual(specialistAssignments(plan, { request: 'Do not add captions. Keep the picture.' }), []);
   assert.deepEqual(specialistAssignments({ ...plan, texts: [{ keyframes: [] }] }, { referenceVideo: true, hasAudio: true, request: 'Match the beat and captions.' }), ['motion', 'captions', 'audio']);
   assert.throws(() => validateSpecialistReport({ summary: 'Advice', findings: [{ techniqueId: 'unknown' }] }, plan), /Invalid/);
+});
+
+test('audio preservation alone does not schedule a specialist but actual sound work still does', () => {
+  const plan = { source: { volume: 1, keyframes: [] }, texts: [], techniques: [technique], audio: { decision: 'preserve', clips: [] } };
+  for (const request of ['Keep this 3-second test clip and audio duration unchanged.', 'Keep the original audio unchanged.', 'Preserve source sound.']) {
+    assert.deepEqual(specialistAssignments(plan, { request }), [], request);
+    assert.deepEqual(specialistAssignments(plan, { request, referenceVideo: true, hasAudio: true }), request.includes('duration') ? ['motion', 'audio'] : ['motion'], request);
+  }
+  for (const request of ['Keep audio unchanged, but add music.', 'Preserve source sound. Add a whoosh sound effect.', 'Check audio synchronization.', 'Do not keep audio unchanged.', "Don't preserve source sound."]) {
+    assert.ok(specialistAssignments(plan, { request }).includes('audio'), request);
+  }
+  assert.ok(specialistAssignments({ ...plan, audio: { decision: 'augment', clips: [{}] } }, { request: 'Keep audio unchanged.' }).includes('audio'));
+  assert.ok(specialistAssignments({ ...plan, source: { volume: 0.5, keyframes: [] } }, { request: 'Keep audio unchanged.', hasAudio: true }).includes('audio'));
 });
 
 test('visual-only repairs reuse audio checks, while changed audio and unknown failures invalidate them', () => {

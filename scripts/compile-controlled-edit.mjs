@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { compileControlledSpec, validateControlledPlan } from '../src/server/editing/controlled-plan.mjs';
 import { mergeClipEdit } from './merge-clip-edit.mjs';
 import { renderVectorAssets } from '../src/server/editing/vector-assets.mjs';
-import { writeMotionCurves, writeCatalogEffect, enableNativeCompositing } from '../src/server/editing/native-controls.mjs';
+import { writeMotionCurves, writeCatalogEffect, enableNativeCompositing, assertCompositeEffectScope } from '../src/server/editing/native-controls.mjs';
 import { resolveTextFont } from '../src/server/editing/text-fonts.mjs';
 import { assertEditingScope } from '../src/server/editing/edit-scope.mjs';
 import { renderAudioAssets } from '../src/server/editing/audio-synthesis.mjs';
@@ -19,6 +19,8 @@ const spec = JSON.parse(await readFile(join(job, 'spec.json'), 'utf8'));
 const source = await realpath(spec.source.path);
 if (!inside(job, source)) throw new Error('Source is outside this job.');
 const plan = validateControlledPlan(JSON.parse(await readFile(join(job, `controlled-plan-${round}.json`), 'utf8')), spec.source.duration);
+const original = JSON.parse(await readFile(join(job, 'original-draft.json'), 'utf8'));
+assertCompositeEffectScope(plan.effects || [], original, spec.source.clipId);
 assertEditingScope(plan, spec.editingScope || 'full');
 // Unresolved requirements belong in the quality report. Constructing an
 // inspectable candidate must not turn uncertainty into either a crash or a pass.
@@ -68,7 +70,7 @@ for (const ref of ['source', ...(plan.overlays || []).map((_, index) => `overlay
   if (receipt) execution.push(receipt);
 }
 for (const [effectIndex, effect] of (plan.effects || []).entries()) {
-  const target = compiled.refs[effect.target || 'source'];
+  const target = compiled.refs[effect.target === 'composition' ? 'source' : effect.target || 'source'];
   if (!target) throw new Error(`The effect target does not exist: ${effect.target}`);
   const segment = generated.tracks.flatMap(track => track.segments).find(segment => segment.id === target);
   const start = Math.round(effect.start * 1e6), end = start + Math.round(effect.duration * 1e6);
@@ -83,12 +85,11 @@ for (const [effectIndex, effect] of (plan.effects || []).entries()) {
 }
 saveDraft(generatedFile, generated);
 const { draft: current, filePath } = loadDraft(candidate, { activeTimeline: existsSync(join(candidate, 'Timelines')) });
-const original = JSON.parse(await readFile(join(job, 'original-draft.json'), 'utf8'));
 let merged;
 if (spec.source.clipId) {
   for (const items of Object.values(generated.materials)) if (Array.isArray(items)) for (const item of items)
     if (item.bind_segment_id === compiled.refs.source) item.bind_segment_id = spec.source.clipId;
-  merged = mergeClipEdit(original, generated, spec.source.clipId);
+  merged = mergeClipEdit(original, generated, spec.source.clipId, { compositionEffectIds: execution.filter(op => op.operation === 'native.effect' && op.scope === 'composition').map(op => op.materialId) });
 }
 else {
   if (original.tracks.some(track => track.segments?.length)) throw new Error('Choose a clip in a populated project.');

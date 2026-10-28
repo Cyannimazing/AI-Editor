@@ -49,6 +49,7 @@ function nestedDrafts(draft: NativeDraft): NativeDraft[] {
 export async function validateNativeCandidate(input: {
   original: NativeDraft; candidate: NativeDraft; manifest: NativeManifest; analysis: ReferenceAnalysis;
   clipId?: string; start: number; duration: number; candidatePath: string; sourcePaths: string[]; width: number; height: number;
+  compositionEffectIds?: string[];
 }) {
   const { original, candidate, manifest, analysis, clipId, start, duration, candidatePath } = input;
   if (!candidate || !Array.isArray(candidate.tracks) || !candidate.materials || candidate.tracks.length > 100 ||
@@ -122,6 +123,11 @@ export async function validateNativeCandidate(input: {
     for (const segment of track.segments.filter((item) => !originalSegmentIds.has(item.id))) {
       const material = candidateMaterials.get(segment.material_id);
       const boundToSource = typeof material?.bind_segment_id === "string" && rootSegments.some(segment => segment.id === material.bind_segment_id && (sourceIds.has(segment.id) || !originalSegmentIds.has(segment.id)));
+      const range = segment.target_timerange;
+      const authorizedComposite = material?.apply_target_type === 2 && !material.bind_segment_id && input.compositionEffectIds?.includes(material.id) &&
+        !original.tracks.filter(t => t.type !== 'audio').flatMap(t => t.segments).some(s => !sourceIds.has(s.id) &&
+          s.target_timerange.start < range.start + range.duration && s.target_timerange.start + s.target_timerange.duration > range.start);
+      if (authorizedComposite) continue;
       if ((!sourceOnMain && !boundToSource) || material?.apply_target_type !== 0 || (material.bind_segment_id && !boundToSource)) throw new Error("Isolate or bind this effect to the edited source; it would affect unrelated layers.");
     }
   }

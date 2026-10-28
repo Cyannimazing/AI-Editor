@@ -35,6 +35,20 @@ test('preserves surrounding clips/audio and offsets only added layers', () => {
   assert.deepEqual(merged.materials.videos.find((item) => item.id === 'normalized-video').crop, { left: 0.1 });
 });
 
+test('multiple scoped edits accumulate without losing previous edits or changing unchecked clips', () => {
+  const { original, generated } = fixtures();
+  const first = mergeClipEdit(original, generated, 'before');
+  const firstSegment = structuredClone(first.tracks[0].segments[0]);
+  const firstOverlay = structuredClone(first.tracks[1]);
+  const second = mergeClipEdit(first, generated, 'selected');
+  assert.deepEqual(second.tracks[0].segments[0], firstSegment);
+  assert.deepEqual(second.tracks.find(track => track.id === firstOverlay.id), firstOverlay);
+  assert.deepEqual(second.tracks[0].segments[2], original.tracks[0].segments[2]);
+  assert.deepEqual(second.tracks.find(track => track.id === 'audio'), original.tracks[1]);
+  assert.equal(second.duration, original.duration);
+  assert.equal(new Set(second.tracks.flatMap(track => track.segments.map(segment => segment.id))).size, second.tracks.flatMap(track => track.segments).length);
+});
+
 test('keeps existing upper layers above the generated clip edit', () => {
   const { original, generated } = fixtures();
   const upper = { id: 'upper', type: 'video', segments: [{ id: 'existing-overlay', render_index: 10000,

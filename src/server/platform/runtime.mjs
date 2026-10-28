@@ -2,12 +2,14 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, win32, posix } from 'node:path';
 
-export function platformPaths(platform = process.platform, home = homedir(), env = process.env) {
+export function platformPaths(platform = process.platform, home = homedir(), env = process.env, exists = existsSync) {
   if (!['win32', 'darwin'].includes(platform)) throw new Error('AI-Editor supports Windows and macOS.');
   const { join } = platform === 'win32' ? win32 : posix;
   return {
     drafts: env.AI_EDITOR_DRAFTS_ROOT || (platform === 'darwin' ? join(home, 'Movies', 'CapCut', 'User Data', 'Projects', 'com.lveditor.draft') : join(env.LOCALAPPDATA || join(home, 'AppData', 'Local'), 'CapCut', 'User Data', 'Projects', 'com.lveditor.draft')),
-    capcut: env.AI_EDITOR_CAPCUT_PATH || (platform === 'darwin' ? '/Applications/CapCut.app' : join(env.LOCALAPPDATA || join(home, 'AppData', 'Local'), 'CapCut', 'Apps', 'CapCut.exe')),
+    capcut: env.AI_EDITOR_CAPCUT_PATH || (platform === 'darwin'
+      ? ['/Applications/CapCut.app', join(home, 'Applications', 'CapCut.app')].find(exists) || '/Applications/CapCut.app'
+      : join(env.LOCALAPPDATA || join(home, 'AppData', 'Local'), 'CapCut', 'Apps', 'CapCut.exe')),
   };
 }
 

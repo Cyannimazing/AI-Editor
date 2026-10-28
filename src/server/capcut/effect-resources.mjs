@@ -1,13 +1,19 @@
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { isAbsolute, join, relative } from 'node:path';
+import { isAbsolute, join, relative, win32, posix } from 'node:path';
 
 const inside = (root, path) => { const offset = relative(root, path); return offset !== '..' && !offset.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(offset); };
-export function effectCacheRoot(platform = process.platform, env = process.env) {
+export function effectCacheRoot(platform = process.platform, env = process.env, home = homedir()) {
+  if (!['win32', 'darwin'].includes(platform)) throw new Error('Unsupported CapCut effect-cache platform.');
+  const paths = platform === 'win32' ? win32 : posix;
+  if (env.AI_EDITOR_CAPCUT_EFFECT_CACHE) {
+    if (!paths.isAbsolute(env.AI_EDITOR_CAPCUT_EFFECT_CACHE)) throw new Error('CapCut effect-cache override must be absolute.');
+    return paths.normalize(env.AI_EDITOR_CAPCUT_EFFECT_CACHE);
+  }
   return platform === 'win32'
-    ? join(env.LOCALAPPDATA || join(homedir(), 'AppData/Local'), 'CapCut/User Data/Cache/effect')
-    : join(homedir(), 'Movies/CapCut/User Data/Cache/effect');
+    ? paths.join(env.LOCALAPPDATA || paths.join(home, 'AppData/Local'), 'CapCut/User Data/Cache/effect')
+    : paths.join(home, 'Movies/CapCut/User Data/Cache/effect');
 }
 
 /** Search supplies identity; the installed CapCut bundle supplies real control names.
@@ -51,6 +57,44 @@ export function effectBundleFiles(folder, maximumBytes = 128 * 1024 * 1024) {
     } else throw new Error('Unsupported native resource file type.');
   }
   visit(folder, 0); return files;
+}
+
+/** A cache directory can appear while CapCut is still extracting it. Check
+ * the package entry points and fingerprint its payload before settling it.
+ * Availability is still not proof of rendering or reference similarity.
+ */
+export function probeEffectBundle(entry, item, root = effectCacheRoot()) {
+  const incomplete = () => ({ available: false, resourceId: item.resource_id, controls: [], reason: 'Native package extraction is incomplete.' });
+  try {
+    const resource = inspectEffectResource(entry, item, root);
+    if (!resource.available) return resource;
+    const files = effectBundleFiles(resource.folder);
+    const configFile = files.find(file => file.relative === 'config.json');
+    if (!configFile || !configFile.size || configFile.size > 1024 * 1024) return incomplete();
+    const config = JSON.parse(readFileSync(configFile.path, 'utf8'));
+    const links = config.effect?.Link;
+    if (!Array.isArray(links) || !links.length) return incomplete();
+    for (const link of links) {
+      if (typeof link.path !== 'string' || !link.path || win32.isAbsolute(link.path) || posix.isAbsolute(link.path)
+        || link.path.split(/[\\/]/).some(part => part === '..')) throw new Error('Unsafe native effect entry point.');
+      const target = join(resource.folder, link.path);
+      if (!inside(resource.folder, target)) throw new Error('Unsafe native effect entry point.');
+      const payload = files.filter(file => inside(target, file.path) && file.size > 0);
+      if (!payload.length) return incomplete();
+      if (link.type === 'AmazingFeature' && !payload.some(file => file.path === join(target, 'main.scene'))) return incomplete();
+    }
+    const fingerprint = createHash('sha256');
+    for (const file of files.sort((a, b) => a.relative.localeCompare(b.relative))) {
+      const bytes = readFileSync(file.path);
+      if (!bytes.length) return incomplete();
+      if (file.relative.endsWith('.json')) JSON.parse(bytes);
+      fingerprint.update(file.relative).update('\0').update(bytes);
+    }
+    return { ...resource, bundleFingerprint: fingerprint.digest('hex') };
+  } catch (error) {
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) return incomplete();
+    throw error;
+  }
 }
 
 export function selectOfficialEffect(entry, items) {

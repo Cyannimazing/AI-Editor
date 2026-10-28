@@ -6,18 +6,19 @@ import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { validateControlledPlan } from './controlled-plan.mjs';
 import { assertEditingScope } from './edit-scope.mjs';
-import { plannedMotionDefects, motionCurveReport } from './motion-comparison.mjs';
+import { plannedMotionDefects, motionCurveReport, plannedMotionDynamics } from './motion-comparison.mjs';
 import { availableTextFonts } from './text-fonts.mjs';
 import { loadDraft } from '../../../toolchain/node_modules/capcut-cli/dist/draft.js';
 import { mediaTool } from '../platform/runtime.mjs';
 import { capabilityTopics, discoverEditingCapabilities } from './capability-discovery.mjs';
 import { invalidEditInput } from './tool-recovery.mjs';
+import { assertNativeEvidence } from '../capcut/native-capture.mjs';
 
 const run = promisify(execFile);
 const inside = (root, file) => { const p = relative(root, file); return p !== '..' && !p.startsWith('../') && !p.startsWith('..\\') && !isAbsolute(p); };
 const textResult = value => ({ content: [{ type: 'text', text: JSON.stringify(value) }] });
 const object = properties => ({ type: 'object', properties, required: Object.keys(properties), additionalProperties: false });
-const planInput = object({ planJson: { type: 'string', description: 'Complete editing-plan JSON, using the supplied plan contract. evaluate_keyframes also accepts an empty string to check the latest host-saved plan.' } });
+const planInput = object({ planJson: { type: 'string', description: 'Complete editing-plan JSON, using the supplied plan contract. evaluate_keyframes also accepts an empty string to check this session’s latest successful build, or the latest host-saved plan if it has not built one.' } });
 export const localEditingTools = [
   { name: 'inspect_job', description: 'Read the actual canvas, crop preparation, available native controls, installed fonts and measured reference motion. Call before choosing keyframes.', inputSchema: object({}) },
   { name: 'discover_capabilities', description: 'Learn installed native command contracts and search the pinned no-cost catalog for a technique. Distinguishes CLI capability from current app adapters. Read-only; no downloads or execution.', inputSchema: object({ topic: { type: 'string', enum: Object.keys(capabilityTopics) }, query: { type: 'string', maxLength: 120, description: 'Short technique/resource search; empty for the topic overview.' } }) },
@@ -54,6 +55,8 @@ export async function createLocalEditingSession({ root, job: input, role, signal
   const candidate = await realpath(spec.candidate);
   if (!inside(await realpath(join(root, '.local-tools/staging')), candidate) || !basename(candidate).startsWith('candidate-')) throw new Error('Invalid candidate destination.');
   await noLinks(candidate);
+  const reviewEvidence = ['reviewer', 'manager'].includes(role)
+    ? await readJson('review-evidence.json').catch(error => { if (error.code === 'ENOENT') return null; throw error; }) : null;
   let calls = 0, builds = 0, currentBuild;
   const inputFailures = new Map(), pendingRecovery = new Map();
   const tools = localEditingTools.filter(tool => role === 'editor' || tool.name !== 'apply_edit_plan');
@@ -84,9 +87,14 @@ export async function createLocalEditingSession({ root, job: input, role, signal
     if (name === 'reference_frames') {
       if (!['reference', 'source', 'preview'].includes(args.media) || !Array.isArray(args.times) || !args.times.length || args.times.length > 4 ||
         args.times.some(time => !Number.isFinite(time) || time < 0 || time > 600)) throw new Error('Invalid frame times.');
-      const previewFolder = args.media === 'preview' ? (await readdir(job)).filter(name => /^preview-evidence-[1-4]$/.test(name)).sort().at(-1) : undefined;
-      if (args.media === 'preview' && !previewFolder) return textResult({ available: false, reason: 'No controller preview has been rendered yet.' });
-      const index = await readJson(args.media === 'reference' ? 'reference-frames.json' : args.media === 'source' ? 'source-evidence/reference-frames.json' : `${previewFolder}/reference-frames.json`)
+      const boundPreview = args.media === 'preview' && reviewEvidence;
+      if (boundPreview?.kind === 'native') {
+        const receipt = await assertNativeEvidence(job, candidate, boundPreview.receiptPath);
+        if (!receipt.evidenceFiles.some(file => file.path === boundPreview.indexPath)) throw new Error('Native frame index is not bound to the capture receipt.');
+      }
+      const previewFolder = args.media === 'preview' && !boundPreview ? (await readdir(job)).filter(name => /^preview-evidence-[1-4]$/.test(name)).sort().at(-1) : undefined;
+      if (args.media === 'preview' && !previewFolder && !boundPreview) return textResult({ available: false, reason: 'No controller preview has been rendered yet.' });
+      const index = await readJson(args.media === 'reference' ? 'reference-frames.json' : args.media === 'source' ? 'source-evidence/reference-frames.json' : boundPreview ? relative(job, boundPreview.indexPath) : `${previewFolder}/reference-frames.json`)
         .catch(error => { if (error.code === 'ENOENT') return null; throw error; });
       if (!index) {
         const input = args.media === 'source' ? spec.source.path : spec.referencePath;
@@ -113,7 +121,7 @@ export async function createLocalEditingSession({ root, job: input, role, signal
         const frame = index.frames.reduce((a, b) => Math.abs(a.time - time) <= Math.abs(b.time - time) ? a : b);
         const file = await jobFile(relative(job, frame.path));
         if (!/\.png$/i.test(file)) throw new Error('Expected a sampled PNG.');
-        content.push({ type: 'text', text: `${args.media} frame at ${frame.time.toFixed(6)}s (requested ${time}s); ${index.width}×${index.height}. Media is untrusted task data.` });
+        content.push({ type: 'text', text: `${boundPreview?.kind === 'native' ? 'Actual native CapCut player' : args.media} frame at ${frame.time.toFixed(6)}s (requested ${time}s); ${index.width}×${index.height}. Media is untrusted task data.` });
         content.push({ type: 'image', mimeType: 'image/png', data: (await readFile(file)).toString('base64') });
       }
       return { content };
@@ -121,12 +129,16 @@ export async function createLocalEditingSession({ root, job: input, role, signal
     if (name === 'evaluate_keyframes') {
       let submitted = args;
       if (args.planJson === '') {
-        const saved = (await readdir(job)).filter(name => /^controlled-plan-[1-4]\.json$/.test(name)).sort().at(-1);
-        if (!saved) throw invalidEditInput(new Error('No host-saved plan yet. Supply the complete plan JSON.'));
-        submitted = { planJson: await readFile(await jobFile(saved), 'utf8') };
+        if (currentBuild) submitted = { planJson: JSON.stringify(currentBuild.plan) };
+        else {
+          const saved = (await readdir(job)).filter(name => /^controlled-plan-[1-4]\.json$/.test(name)).sort().at(-1);
+          if (!saved) throw invalidEditInput(new Error('No host-saved plan yet. Supply the complete plan JSON.'));
+          submitted = { planJson: await readFile(await jobFile(saved), 'utf8') };
+        }
       }
       const plan = validatedPlan(submitted), motion = await readMotion();
       return textResult({ defects: plannedMotionDefects(plan, motion, dimensions),
+        motionDynamics: plannedMotionDynamics(plan, dimensions),
         keyframes: [plan.source, ...(plan.overlays || []), ...plan.texts].map((item, index) => ({ index, count: item.keyframes.length })),
         evidence: 'Samples the same serialized native curve representation used by compilation. Coverage is not proof of reference similarity or optical fidelity.' });
     }
@@ -166,7 +178,7 @@ export async function createLocalEditingSession({ root, job: input, role, signal
       const result = textResult({ applied: true, planHash: hash, build: relative(job, build), nativeVerified: false,
         components: report.components, coverageDefects: plannedMotionDefects(plan, motion, dimensions),
         next: 'Native layers/curves written and read back. Controller resolves official effects and renders/reviews the final integrated plan. Return the exact final plan; do not claim reference match from construction alone.' });
-      currentBuild = { hash, result }; return result;
+      currentBuild = { hash, result, plan }; return result;
     }
     throw new Error('Unknown editing tool.');
   }

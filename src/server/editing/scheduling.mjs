@@ -3,10 +3,17 @@ import { createHash } from 'node:crypto';
 export function specialistAssignments(plan, { referenceVideo = false, request = '', hasAudio = false } = {}) {
   const assignments = [];
   const requested = request.replace(/\b(?:no|without|do not add|don't add)\s+[^.!?;\n]*?(?=\bbut\b|[.!?;\n]|$)/gi, ' ');
+  // Preservation is a constraint, not a request for new sound design. Strip
+  // only the preservation phrase so a later "but add music" remains actionable.
+  const audioPreservation = /\b(?:audio|sound|music|soundtrack)\s+(?:unchanged|intact|as[- ]is)\b|\bpreserve\s+(?:the\s+)?(?:(?:original|source|existing)\s+)?(?:audio|sound|music|soundtrack)\b/gi;
+  const negatesPreservation = /\b(?:don't|do not|never)\s+(?:keep|leave|preserve)\b/i.test(requested);
+  const preservesAudio = !negatesPreservation && Boolean(requested.match(audioPreservation));
+  const audioRequest = negatesPreservation ? requested : requested.replace(audioPreservation, ' ')
+    .replace(/\b(?:audio|sound|music|soundtrack)\s+duration\s+unchanged\b/gi, ' ');
   const layers = [plan.source, ...plan.texts, ...(plan.overlays || [])];
   if (referenceVideo || plan.effects?.length || plan.overlays?.length || layers.some(layer => layer.keyframes.length)) assignments.push('motion');
   if (plan.texts.length || /\b(captions?|subtitles?|typography|wording)\b/i.test(requested)) assignments.push('captions');
-  if (plan.audio?.clips?.length || /\b(audio|sound|music|beat|speech|voice|mix)\b/i.test(requested) || hasAudio && (referenceVideo || plan.source.volume !== 1 || plan.source.keyframes.some(frame => frame.property === 'volume'))) assignments.push('audio');
+  if (plan.audio?.clips?.length || /\b(audio|sound|music|beat|speech|voice|mix)\b/i.test(audioRequest) || hasAudio && (referenceVideo && !preservesAudio || plan.source.volume !== 1 || plan.source.keyframes.some(frame => frame.property === 'volume'))) assignments.push('audio');
   return assignments;
 }
 

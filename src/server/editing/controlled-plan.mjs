@@ -107,7 +107,7 @@ export function validateControlledPlan(plan, duration) {
     }
     for (const item of plan.effects) {
       exactKeys(item, ['slug', 'start', 'duration', 'intensity', 'params', ...(Object.hasOwn(item, 'target') ? ['target'] : [])], 'effect');
-      if (item.target !== undefined && !/^(source|overlay-\d+|text-\d+)$/.test(item.target)) throw new Error('Invalid native effect target.');
+      if (item.target !== undefined && !/^(source|composition|overlay-\d+|text-\d+)$/.test(item.target)) throw new Error('Invalid native effect target.');
       if (typeof item.slug !== 'string' || item.slug.length > 100 || !Array.isArray(item.params) || item.params.length > 20) throw new Error('Invalid native effect.');
       finite(item.start, 0, duration, 'effect start'); finite(item.duration, 0.01, duration, 'effect duration'); finite(item.intensity, 0, 1, 'effect intensity');
       if (item.start + item.duration > duration + 0.000002) throw new Error('Effect exceeds the selected interval.');
@@ -137,11 +137,21 @@ export function compileControlledSpec(plan, input, assets = new Map(), audioAsse
     tracks.push({ type: 'video', name: `AI overlay ${index + 1}`, items: [{ ref: `overlay-${index}`, path, type: item.assetId === 'source' ? 'video' : 'photo',
       start: item.start, duration: item.duration, sourceStart: item.sourceStart, scale: item.scale, x: item.x, y: item.y, rotation: item.rotation, opacity: item.opacity, volume: 0 }] });
   }
-  if (plan.texts.length) tracks.push({ type: 'text', name: 'AI editable text', items: plan.texts.map((item, index) => {
+  const textTracks = [];
+  for (const [index, item] of plan.texts.entries()) {
     motion(`text-${index}`, item);
-    return { ref: `text-${index}`, text: item.text, start: item.start, duration: item.duration, fontSize: pixelsToNativeTextSize(item.fontSizePx, input.width, input.height),
-      color: item.color, scale: item.scale, x: item.x, y: item.y, rotation: item.rotation, opacity: item.opacity };
-  }) });
+    // Text can be composited (titles, trails, simultaneous labels), not only
+    // sequential captions. Reuse tracks for disjoint intervals, but keep each
+    // later text above every earlier text it overlaps (the declared paint order).
+    const startUs = Math.round(item.start * 1e6), endUs = Math.round((item.start + item.duration) * 1e6);
+    let layer = 0;
+    for (const [trackIndex, track] of textTracks.entries()) if (track.items.some(previous =>
+      Math.round(previous.start * 1e6) < endUs && Math.round((previous.start + previous.duration) * 1e6) > startUs)) layer = trackIndex + 1;
+    textTracks[layer] ||= { type: 'text', name: `AI editable text ${layer + 1}`, items: [] };
+    textTracks[layer].items.push({ ref: `text-${index}`, text: item.text, start: item.start, duration: item.duration, fontSize: pixelsToNativeTextSize(item.fontSizePx, input.width, input.height),
+      color: item.color, scale: item.scale, x: item.x, y: item.y, rotation: item.rotation, opacity: item.opacity });
+  }
+  tracks.push(...textTracks);
   for (const [index, item] of (plan.audio?.clips || []).entries()) {
     const path = audioAssets.get(item.assetId); if (!path) throw new Error(`Missing generated audio: ${item.assetId}`);
     motion(`audio-${index}`, item);

@@ -61,7 +61,9 @@ ${[...new Set(layers.map(layer => layer.font).filter(Boolean))].map(font => `@fo
 </style></head><body><div id="composition" data-composition-id="native-motion" data-start="0" data-duration="${duration}" data-width="${width}" data-height="${height}" data-fps="${fps}">${elements}</div>
 <script src="gsap.min.js"></script><script>
 const tl=gsap.timeline({paused:true});
-for(const item of ${safeJson(animations)}){const first=item.samples[0];tl.set(item.id,{xPercent:-50,yPercent:-50,...first.pose},first.time);for(let i=1;i<item.samples.length;i++){const a=item.samples[i-1],b=item.samples[i];tl.to(item.id,{...b.pose,duration:b.time-a.time,ease:'none'},a.time);}}
+// Initialize every layer before visibility rounding can reveal it. Native
+// microsecond starts can lie a fraction after the browser's exact frame time.
+for(const item of ${safeJson(animations)}){const first=item.samples[0];tl.set(item.id,{xPercent:-50,yPercent:-50,...first.pose},Math.min(0,first.time));for(let i=1;i<item.samples.length;i++){const a=item.samples[i-1],b=item.samples[i];tl.to(item.id,{...b.pose,duration:b.time-a.time,ease:'none'},a.time);}}
 window.__timelines={'native-motion':tl};
 </script></body></html>`;
 }

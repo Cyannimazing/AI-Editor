@@ -10,6 +10,7 @@ Documentation and installed tools do not automatically add execution adapters. T
 
 | Role | Context | Model / initial reasoning |
 | --- | --- | --- |
+| Project Planner | `roles/planner.md` | GPT-6.1 Sol / medium |
 | Lead Editor | `roles/editor.md` | GPT-6.1 Sol / medium |
 | Motion / Effects | `roles/motion.md` | GPT-6.1 Sol / medium |
 | Captions | `roles/captions.md` | GPT-6 Luna / high |
@@ -23,8 +24,10 @@ The app now starts a per-job local stdio MCP server. Codex can inspect timed fra
 
 Request → candidate → checks/preview → native verification → manager → bounded corrections → user approval → safe commit.
 
+For multiple eligible clips, a read-only project planner assigns the brief across the active timeline before editing. Entire project is the default scope; a checked clip list restricts eligible IDs. One controller accumulates clip changes and rechecks earlier edits against the final revision. Approval commits once to the originally selected project. Missing cross-clip or existing-layer adapters remain explicit; the planner must not repeat an opening title on every clip or silently omit a requirement.
+
 The controller now schedules separate motion, caption and audio specialists when their work is relevant. Their reports are proposals; only the lead integrates the complete plan. Each technique owns exact component bindings and immutable acceptance criteria. Preview and manager defects are combined, so one reviewer cannot erase another's failure. Per-round plans, specialist reports, execution receipts, structural evidence and quality decisions live in the job directory. The UI displays unresolved techniques and defects.
 
-Automatic native export is still a release blocker. A manual calibration pass is evidence for its exact fixture, controls and platform; it must never be reused as proof for an unrelated candidate.
+Normal editing uses saved-file checks and native player inspection, without automatic export. The controller must verify the exact candidate, observed player viewport and timeline positions. Screenshots do not establish native audio playback or real-time smoothness. A calibration pass applies only to its exact fixture, controls and platform; it must never be reused as proof for an unrelated candidate. Real Mac acceptance remains pending.
 
 See `../docs/reference-editing-workflow.md`, `tools.md` and `../docs/audit-remediation.md` for workflow, tool boundaries and current gaps.

@@ -1,4 +1,4 @@
-import { nativePose } from './motion-preview.mjs';
+import { nativePose, nativeCurveValue } from './motion-preview.mjs';
 import { writeMotionCurves } from './native-controls.mjs';
 import { addKeyframes } from '../../../toolchain/node_modules/capcut-cli/dist/decorators.js';
 import { sourceCoverage, coverageDefects } from './motion-coverage.mjs';
@@ -11,6 +11,45 @@ function sourceSegment(source, fps) {
       .map(property => ({ op: 'keyframe', target: 'source', property, time: frame.time, value: frame.value, easing: frame.easing })));
   writeMotionCurves({ fps, tracks: [{ segments: [segment] }] }, operations, { source: 'source' }, addKeyframes);
   return segment;
+}
+
+/** Report velocity from serialized curves, not keyframe counts. These are
+ * observations for the specialist: a stop is a defect only if travel was intended.
+ */
+export function motionDynamics(segment, start = 0, duration = segment.target_timerange?.duration / 1e6) {
+  const round = value => Math.round(value * 1e6) / 1e6;
+  return (segment.common_keyframes || []).map(curve => {
+    const frames = curve.keyframe_list;
+    const intervals = frames.slice(1).map((b, i) => {
+      const a = frames[i], span = b.time_offset - a.time_offset;
+      const rate = fraction => {
+        const center = a.time_offset + span * fraction, h = span * .005;
+        return round((nativeCurveValue(frames, center + h, 0) - nativeCurveValue(frames, center - h, 0)) / (2 * h / 1e6));
+      };
+      return { range: [round(start + a.time_offset / 1e6), round(start + b.time_offset / 1e6)],
+        from: a.values[0], to: b.values[0], kind: a.values[0] === b.values[0] ? 'hold' : 'travel',
+        startRate: rate(.05), midRate: rate(.5), endRate: rate(.95) };
+    });
+    const hold = (from, to, value) => ({ range: [round(start + from), round(start + to)], from: value, to: value,
+      kind: 'hold', startRate: 0, midRate: 0, endRate: 0 });
+    if (frames.length && frames[0].time_offset > 0) intervals.unshift(hold(0, frames[0].time_offset / 1e6, frames[0].values[0]));
+    if (frames.length && Number.isFinite(duration) && frames.at(-1).time_offset / 1e6 < duration)
+      intervals.push(hold(frames.at(-1).time_offset / 1e6, duration, frames.at(-1).values[0]));
+    const stopCandidates = intervals.slice(1).flatMap((b, i) => {
+      const a = intervals[i];
+      if (a.kind !== 'travel' || b.kind !== 'travel' || Math.sign(a.to - a.from) !== Math.sign(b.to - b.from)) return [];
+      const baseline = Math.min(Math.abs(a.midRate), Math.abs(b.midRate));
+      return baseline > 1e-7 && Math.max(Math.abs(a.endRate), Math.abs(b.startRate)) < baseline * .35
+        ? [{ time: b.range[0], reason: 'Same-direction travel slows near zero on both sides of this keyframe. Check for an unintended restart.' }] : [];
+    });
+    return { property: curve.property_type, rateUnits: 'native property units per second; sampled at 5%, 50%, 95% of each interval', intervals, stopCandidates };
+  });
+}
+
+export function plannedMotionDynamics(plan, { fps = 30, duration } = {}) {
+  return [{ component: 'source', item: plan.source }, ...(plan.overlays || []).map((item, i) => ({ component: `overlay-${i}`, item })),
+    ...plan.texts.map((item, i) => ({ component: `text-${i}`, item }))].map(({ component, item }) => ({ component,
+      curves: motionDynamics(sourceSegment(item, fps), item.start || 0, item.duration ?? duration) }));
 }
 
 function projection(pose, x, y) {
@@ -93,7 +132,7 @@ export function motionCurveReport(plan, draft, refs, report, { width, height, du
     const segment = draft.tracks.flatMap(track => track.segments).find(item => item.id === id);
     if (!segment) throw new Error(`Missing motion component ${ref}.`);
     const start = ref === 'source' ? 0 : (ref.startsWith('text-') ? plan.texts[Number(ref.slice(5))] : plan.overlays[Number(ref.slice(8))]).start;
-    return { component: ref, segmentId: id, nativeCurves: (segment.common_keyframes || []).map(curve => ({ property: curve.property_type,
+    return { component: ref, segmentId: id, dynamics: motionDynamics(segment, start), nativeCurves: (segment.common_keyframes || []).map(curve => ({ property: curve.property_type,
       frames: curve.keyframe_list.map(frame => ({ seconds: frame.time_offset / 1e6, value: frame.values[0], interpolation: frame.curveType, left: frame.left_control, right: frame.right_control })) })),
       samples: times.filter(time => time >= start && time < start + segment.target_timerange.duration / 1e6).map(time => ({ time, ...nativePose(segment, time - start, width, height) })) };
   });

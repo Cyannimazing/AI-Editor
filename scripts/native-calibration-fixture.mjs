@@ -9,7 +9,7 @@ const run = promisify(execFile), root = process.cwd();
 const jobs = join(root, '.local-tools/native-assets'), staging = join(root, '.local-tools/staging');
 await mkdir(jobs, { recursive: true }); await mkdir(staging, { recursive: true });
 const job = await mkdtemp(join(jobs, 'calibration-')), candidate = await mkdtemp(join(staging, 'calibration-'));
-const created = JSON.parse((await run(process.execPath, [join(root, 'scripts/create-local-project.mjs'), 'Native calibration'], { cwd: root, windowsHide: true })).stdout);
+const created = JSON.parse((await run(process.execPath, [join(root, 'scripts/create-local-project.mjs'), `Native calibration ${Date.now()}`], { cwd: root, windowsHide: true })).stdout);
 await cp(created.path, candidate, { recursive: true });
 const source = join(job, 'raw.mp4');
 await run(mediaTool('ffmpeg'), ['-hide_banner', '-loglevel', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=640x360:r=30:d=3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', source], { windowsHide: true });

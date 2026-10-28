@@ -32,6 +32,8 @@ test('platform paths keep native separators and support custom CapCut locations'
 });
 
 test('Mac discovery covers Intel, Apple Silicon, per-user apps and keg-only Python without shell PATH', () => {
+  assert.equal(platformPaths('darwin', '/Users/Test User', {}, path => path === '/Users/Test User/Applications/CapCut.app').capcut, '/Users/Test User/Applications/CapCut.app');
+  assert.equal(platformPaths('darwin', '/Users/Test User', {}, () => true).capcut, '/Applications/CapCut.app');
   const options = { platform: 'darwin', home: '/Users/Test User', env: {}, cwd: '/Users/Test User/AI Editor' };
   const ffmpeg = executableCandidates('ffmpeg', options);
   assert.ok(ffmpeg.includes('/opt/homebrew/bin/ffmpeg'));

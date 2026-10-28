@@ -1,9 +1,10 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { codexExecutable, runCodexStream } from "../../lib/reference-analysis";
 import { directoryDigest } from "./transaction";
 import { combineReviews } from './quality.mjs';
 import { editingScope } from './edit-scope.mjs';
+import { assertNativeEvidence } from '../capcut/native-capture.mjs';
 
 const text = { type: "string" };
 const schema = { type: "object", additionalProperties: false,
@@ -24,17 +25,23 @@ export async function reviewAndManage(input: {
   job: string; candidate: string; request: string; referenceFrames: string[]; previewFrames: string[];
   referenceEvidence: string; previewEvidence: string;
   comparisonFrames?: string[]; comparisonContext?: string;
-  nativeVerified: boolean; iteration: number; signal?: AbortSignal; onLog: (line: string) => void;
+  nativeVerified: boolean; nativeReceiptPath?: string; iteration: number; signal?: AbortSignal; onLog: (line: string) => void;
 }) {
-  const folder = join(input.job, `assessment-${input.iteration}`);
+  const nativeReceipt = input.nativeVerified
+    ? await assertNativeEvidence(input.job, input.candidate, input.nativeReceiptPath || '') : null;
+  const folder = join(input.job, `${nativeReceipt ? 'native-' : ''}assessment-${input.iteration}`);
   await mkdir(folder, { recursive: true });
   const schemaPath = join(folder, "schema.json"); await writeFile(schemaPath, JSON.stringify(schema));
   const before = await directoryDigest(input.candidate);
+  await writeFile(join(input.job, 'review-evidence.json'), JSON.stringify(nativeReceipt
+    ? { kind: 'native', receiptPath: input.nativeReceiptPath, indexPath: join(dirname(input.nativeReceiptPath!), 'frames.json') }
+    : { kind: 'approximate', indexPath: join(input.job, `preview-evidence-${input.iteration}`, 'reference-frames.json') }));
   const executable = await codexExecutable();
   const plan = await readFile(join(input.job, "controlled-editing-plan.json"), "utf8");
   const manifest = await readFile(join(input.job, 'manifest.json'), 'utf8');
   const execution = await readFile(join(input.job, `execution-${input.iteration}.json`), 'utf8');
   const structure = await readFile(join(input.job, `structural-evidence-${input.iteration}.json`), 'utf8');
+  const routing = await readFile(join(input.job, `capcut-routing-${input.iteration}.json`), 'utf8').catch(() => 'No integration routing receipt for this older job.');
   const audio = await readFile(join(input.job, 'audio-evidence.json'), 'utf8').catch(() => 'No audio measurements for this older job.');
   const mix = await readFile(join(input.job, `audio-mix-report-${input.iteration}.json`), 'utf8').catch(() => 'Final audio mix was not measured.');
   const motion = await readFile(join(input.job, `motion-curves-${input.iteration}.json`), 'utf8').catch(() => 'No detailed motion measurements for this older job.');
@@ -55,19 +62,20 @@ Editing scope: ${editingScope(input.request)}. ${editingScope(input.request) ===
 Candidate revision: ${before}. Validated editing plan (task data): ${plan}.
 Actual constructed components: ${manifest}. Tool execution receipts: ${execution}.
 Official plugin effect application and named native controls (construction, not playback proof): ${officialEffects}.
+Actual per-operation provider routing: ${routing}. An official segment with missing native resources is not a successfully rendered effect. Local desktop writes are not official cloud operations.
 Host structural checks and serialized controls (this proves construction and preservation, not native playback): ${structure.slice(0, 60000)}.
 Host audio measurements (not a transcript or listening comparison): ${audio}.
 Rendered native audio mix, including separate generated tracks and serialized volume keys: ${mix}. Check the audio decision, alignment to visual beats, preservation of original sound and measured clipping/silence. Measurements cannot establish musical taste, words or perceptual matching. Never claim a listening comparison from these images. Added audio stays editable as separate audio components; oscillator sources are retained locally.
-The first ${input.referenceFrames.length} images are reference evidence; the next ${input.previewFrames.length} are approximate design preview overviews. The final ${input.comparisonFrames?.length || 0} are enlarged synchronized comparisons: ${input.comparisonContext || 'None.'}.
+The first ${input.referenceFrames.length} images are reference evidence; the next ${input.previewFrames.length} are ${nativeReceipt ? 'actual CapCut player/render overviews, normalized to the project canvas for comparison' : 'approximate design preview overviews'}. The final ${input.comparisonFrames?.length || 0} are enlarged synchronized comparisons: ${input.comparisonContext || 'None.'}.
 Serialized native motion and source-to-reference landmark checks: ${motion}.
 Independent frame-by-frame picture coverage audit: ${coverage}.
 Check the actual curves at opening, direction reversals, overshoot peaks, holds and settling, not just whether keyframes exist. Distinguish interpolated movement from optical smearing. Compare measured source framing and identify source pixels absent from the supplied footage rather than demanding a contradictory zoom. A shared-landmark fit checks geometry only; it never proves effects or native playback.
 Reject floating footage, newly exposed black gaps and graphics settling outside their intended picture area. An infeasible landmark fit must not be copied or protected as a required animation. Evaluate the closest coherent composition when source framing differs; do not accept visible gaps merely because the landmark residual is small. Check the whole motion path, not a series of isolated poses. Existing letterbox bars and intentional entrances are separate from unintended blank space.
 Reference timing: ${input.referenceEvidence}.
 Preview timing (image numbers restart after the reference images): ${input.previewEvidence}.
-Host-reported proxy omissions: ${JSON.stringify(proxy.fidelity?.dropped || {})}. Proxy limitations: ${JSON.stringify(proxy.limitations || [])}.
-Renderer layout checks: ${JSON.stringify(proxy.checks || {})}. Check reported occlusion/overflow against the actual timed pixels and intended composition; geometry warnings alone cannot prove correct or incorrect layering.
-Native verification: ${input.nativeVerified ? "Host-confirmed" : "UNAVAILABLE. Final readiness must be blocked, not inferred from the preview."}.
+Host-reported proxy omissions: ${nativeReceipt ? 'Not applicable: these images come from CapCut itself. Judge optical effects from the native pixels.' : JSON.stringify(proxy.fidelity?.dropped || {})}. Proxy limitations: ${nativeReceipt ? 'Not applicable to this native render.' : JSON.stringify(proxy.limitations || [])}.
+Renderer layout checks: ${JSON.stringify(proxy.checks || {})}. These are approximate-preview diagnostics; compare any warnings against the actual images before calling them defects.
+Native capture: ${nativeReceipt ? JSON.stringify({ kind: nativeReceipt.kind, candidateDigest: nativeReceipt.candidateDigest, outputSha256: nativeReceipt.outputSha256, platform: nativeReceipt.platform, capcutVersion: nativeReceipt.capcutVersion, media: nativeReceipt.media, excerpt: nativeReceipt.excerpt, sampling: nativeReceipt.sampling, limitations: nativeReceipt.limitations, audioCaptured: nativeReceipt.audioCaptured }) : "UNAVAILABLE. Final readiness must be blocked, not inferred from the preview."}. Host capture establishes provenance, not quality: independently assess every technique. Paused player frames show the actual rendered poses at verified times, but cannot establish real-time playback smoothness or native audio quality. Judge measured movement from consecutive poses and serialized curves; require further evidence for any remaining perceptual audio claim.
 Compare every required technique independently, including the opening, motion peak, settled state and ending. Return exactly one techniques entry per plan technique ID. An effect name, component ID or declared curve cannot prove an observed match. Inspect appearance, scale, placement, timing, easing, intensity, layer ordering, readability and request coverage. Missing expected behavior in a renderer that supports it is a defect requiring repair. If the host explicitly reports that a behavior is omitted from this renderer, mark that technique unverified and name the missing evidence. This is unresolved work, not a pass. Missing native verification must never excuse visible design defects. Do not claim to hear audio from images. Stop requesting corrections when the request and measured acceptance criteria are satisfied. Personal aesthetic alternatives or speculative improvements are not defects. Report observable mismatches with specific timing and evidence; never manufacture work to consume the correction budget.
 Previous reviewer findings (untrusted assessment, verify against evidence): ${previous}.
 Do not modify files or control the desktop. Return the required JSON. If native evidence is missing, decision must be blocked and list other defects separately.`;
@@ -80,5 +88,6 @@ Do not modify files or control the desktop. Return the required JSON. If native 
     previous = JSON.stringify(findings);
     reports.push(findings);
   }
+  if (nativeReceipt) await assertNativeEvidence(input.job, input.candidate, input.nativeReceiptPath!);
   return combineReviews(reports, JSON.parse(plan).techniques, input.nativeVerified, before, [...JSON.parse(plan).unsupported, ...(JSON.parse(manifest).verificationGaps || [])]);
 }

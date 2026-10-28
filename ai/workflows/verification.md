@@ -2,15 +2,21 @@
 
 Compare the whole request/technique inventory with actual candidate components and timed evidence. The editor's summary is a claim to verify, not proof.
 
+Official CapCut catalog descriptions (including its material `caption` field) are resource-selection evidence only. A successful search, authorization, atomic builder result or cloud save does not establish that the requested technique is visible in this native candidate. Confirm target layer, interval, parameter values and saved keyframes, then compare the actual timed output. Flag duplicated elements when the request was to update an existing element.
+
 For every technique record: expected behavior, implemented component/control IDs, affected interval, asset provenance, observed output and remaining uncertainty. Identify exact missing adapter/runtime/resource requirements separately from observable defects. Do not declare all installed tools unavailable just because one operation failed.
 
 Inspect readable text at actual output size, safe areas, line breaks, timing, movement/easing, transition boundaries, masks/blends, layer order, audio and preserved unrelated content. Verify generated assets exist, have expected dimensions/alpha and retained editable source; text must remain a native text component when promised.
+
+Check sustained motion as well as entrances. Use per-interval velocity diagnostics to locate unintended slowing, restarts and ending holds; verify those moments against timed native frames. A slow zoom that repeatedly stops does not satisfy continuous movement. For optical effects, inspect onset, peak, decay and repeated pulses, including a clean comparison frame. Check smear direction and length, ghost trails, RGB fringes and light/dark changes separately. Do not accept a static blur as proof of a time-varying effect, or an effect name as proof it rendered. Keep uncertain identification distinct from demonstrated visual mismatch.
 
 Use source/asset preview checks, deterministic structural/media checks and native output for their respective purposes. CapCut CLI's FFmpeg proxy omits some effects/keyframes/masks/transitions and can omit text/overlays without the proper options. Missing pixels in a proxy are not automatically missing native controls; native evidence is required to settle fidelity.
 
 An imported video or image has editable timeline/transform controls; its internal rendered pixels are not separate native effects or vector handles. Report the actual boundary. A separate text track and native curves are positive editability evidence, but cannot certify the whole edit or audio quality.
 
 Only host-captured evidence tied to the exact revision/platform/version can pass automatic native verification. The manager cannot override failed security, missing evidence, unresolved request coverage or original approval. Missing required features must not be hidden behind a success badge or an unlabelled partial result.
+
+Normal native evidence comes from CapCut's player, not an automatic export. The controller verifies the unique project, observed viewport and actual timecode at each captured frame. Read the capture's sampling and limitations. Consecutive paused frames can establish rendered positions/effect appearance over timeline time; they do not prove real-time playback performance, export fidelity or the native audio mix. Judge source-audio preservation using file identity and serialized gain/timing where applicable; do not turn that into a listening claim. Uncertain audio/effect behavior remains unverified. Do not request exports as an automatic fallback.
 
 Return exactly one assessment for every required technique ID: matched, defect or unverified, with timed evidence. Read the execution receipts and structural evidence as proof of construction only. Read the renderer's omissions before judging pixels: a supported movement/layout mismatch is repairable; an omitted native optical effect remains unverified. Missing native evidence must not excuse visible defects. The host unions defects from both reviewers and never allows the manager to erase them. Keep unresolved audio identity/wording separate from measured stream, loudness and silence evidence.
 

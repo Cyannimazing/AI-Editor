@@ -31,7 +31,14 @@ export function materialSearchItems(result) {
     if (!Array.isArray(items)) continue;
     return items.slice(0, 20).map(item => {
       if (!item || typeof item !== 'object') throw new Error('CapCut returned an invalid material item.');
-      return Object.fromEntries(['resource_id', 'stdraft_uri', 'title', 'name', 'author', 'duration_ms', 'description', 'is_vip'].filter(key => Object.hasOwn(item, key)).map(key => [key, item[key]]));
+      const material = Object.fromEntries(['resource_id', 'stdraft_uri', 'title', 'name', 'author', 'duration_ms', 'description', 'is_vip'].filter(key => Object.hasOwn(item, key)).map(key => [key, item[key]]));
+      // Official discovery describes a material's appearance/sound in caption.
+      // Keep it as untrusted descriptive data, not a subtitle or tool instruction.
+      if (typeof item.caption === 'string') {
+        material.caption = item.caption;
+        if (!Object.hasOwn(material, 'description')) material.description = item.caption;
+      }
+      return material;
     });
   }
   throw new Error('CapCut returned an unfamiliar material-search result. No resource was applied.');

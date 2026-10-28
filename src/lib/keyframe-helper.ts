@@ -39,6 +39,12 @@ export async function listProjects(includeLocal = true): Promise<ProjectSummary[
   for (const entry of folders.filter((item) => item.isDirectory())) {
     try {
       const { folder: path, draft } = await readProjectDraft(prefix + entry.name);
+      // Review fixtures are not editing destinations. Do not infer ownership
+      // from a user's project name; only our explicit marker hides a copy.
+      if (!includeLocal) {
+        const marker = await readFile(join(path, '.ai-editor-review.json'), 'utf8').then(JSON.parse).catch(() => null);
+        if (marker?.kind === 'temporary-review') continue;
+      }
       if (!Array.isArray(draft.tracks)) continue;
       let name = draft.name || entry.name;
       try {

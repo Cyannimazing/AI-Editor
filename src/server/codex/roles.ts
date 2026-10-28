@@ -3,6 +3,7 @@ import { loadRoleInstructions } from "./context.mjs";
 import { toolKnowledge, toolKnowledgeSummary } from "../setup/tool-knowledge";
 
 export const roles = {
+  planner: { model: "gpt-6.1-sol", effort: "medium", writes: false },
   editor: { model: "gpt-6.1-sol", effort: "medium", writes: false },
   motion: { model: "gpt-6.1-sol", effort: "medium", writes: false },
   captions: { model: "gpt-6-luna", effort: "high", writes: false },
