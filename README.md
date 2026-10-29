@@ -104,6 +104,8 @@ GSAP/HyperFrames, appropriately licensed Remotion and FFmpeg can create local gr
 
 ## Editing workflow
 
+**Mac native review permissions:** if the edit builds but review asks for Accessibility, enable the app that started the server in **System Settings → Privacy & Security → Accessibility** and **Screen & System Audio Recording**. For the Terminal setup above, use Terminal; if you started from an IDE, confirm the launcher named by macOS. Allow **Automation → System Events / CapCut** when requested. Quit/reopen that launcher and restart AI-Editor. The browser viewing localhost does not perform native inspection. See the [Mac review troubleshooting guide](docs/macos-native-review-2026-10-30.md), including what to do when a temporary copy stays on CapCut Home.
+
 1. Select a saved CapCut project or create a disposable test project in the app.
 2. Use **Entire project** to let AI plan changes across the active timeline, or **Selected clips** to check one or more clips by filename, track and time. An empty project still needs footage. Enter instructions; a reference is optional.
 3. The controller checks account/model availability, isolation, tools, source paths and an exclusive lock.

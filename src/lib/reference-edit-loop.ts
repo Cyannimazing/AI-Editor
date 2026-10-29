@@ -19,6 +19,7 @@ import { localEffectBuilder } from '../server/capcut/local-builder.mjs';
 import { integrationCapabilities, effectRoutingReceipt } from '../server/capcut/integration-policy.mjs';
 import { referenceEvidenceContext } from "../server/editing/reference-context.mjs";
 import { editingFailureMessage, requiresHostAttention } from "../server/editing/errors.mjs";
+import { captureFailureDiagnostic } from '../server/editing/diagnostics.mjs';
 import { nativeReviewCapability } from "../server/capcut/review";
 import { captureNativePreview } from "../server/capcut/native-preview.mjs";
 import { assertNoLinks, containedPath } from "../server/security/paths";
@@ -361,7 +362,8 @@ Final output uses the editor result envelope: after a successful apply_edit_plan
         history.push({ iteration, phase: 'native_capture_failed', message: reason });
         await writeFile(join(job, 'loop-history.json'), JSON.stringify(history));
         await writeFile(join(job, 'quality-report.json'), JSON.stringify(findings));
-        return { manifest, iterations: iteration, model: editingAgent.model, access: editingAgent.access, verified: false, evidencePath: '', quality: findings };
+        return { manifest, iterations: iteration, model: editingAgent.model, access: editingAgent.access, verified: false, evidencePath: '', quality: findings,
+          diagnostic: captureFailureDiagnostic(error) };
       }
       const nativeFrames = captured.nativeFrames;
       const nativeIndex = JSON.parse(await readFile(nativeFrames.indexPath, 'utf8'));

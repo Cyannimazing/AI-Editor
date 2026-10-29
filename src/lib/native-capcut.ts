@@ -158,7 +158,7 @@ export async function applyNativeCapCut(input: ApplyInput): Promise<NativeEditRe
       input.signal?.throwIfAborted();
       if (result !== final) {
         const checked = await reviewFinalProjectClip({ result, candidate: final.candidatePath, onLog: input.onLog ?? (() => {}), signal: input.signal });
-        result.quality = checked.quality; result.verified = checked.verified; result.evidencePath = checked.evidencePath;
+        result.quality = checked.quality; result.verified = checked.verified; result.evidencePath = checked.evidencePath; result.diagnostic = checked.diagnostic;
       }
       if (result.evidencePath) evidence.push({ jobPath: result.jobPath, evidencePath: result.evidencePath });
     }
@@ -175,7 +175,8 @@ export async function applyNativeCapCut(input: ApplyInput): Promise<NativeEditRe
     };
     await writeFile(join(folder, 'project-result.json'), JSON.stringify({ originalDigest, finalCandidate: final.candidatePath, revision: final.candidateDigest, plan, evidence, quality }));
     return { ...final, prompt: input.prompt, scope: selection.mode, selectedClipIds: selection.clipIds, projectPlan: plan, nativeEvidenceSet: evidence,
-      verified, quality, applied: results.flatMap(result => result.applied), toolsUsed: [...new Set(results.flatMap(result => result.toolsUsed))],
+      verified, quality, diagnostic: results.find(result => result.diagnostic)?.diagnostic,
+      applied: results.flatMap(result => result.applied), toolsUsed: [...new Set(results.flatMap(result => result.toolsUsed))],
       notes: `${verified ? 'Changes are ready for approval.' : 'Some changes remain unverified.'} Approval saves to “${project.name}”. The original remains unchanged.`,
       sourceName: `${tasks.length} clips in ${project.name}`, iterations: results.reduce((sum, result) => sum + result.iterations, 0) };
   } finally { activeProjects.delete(input.projectId); desktopInUse = false; }
@@ -279,7 +280,7 @@ async function buildNativeClip(input: ApplyInput, context: ProjectContext) {
       toolsUsed: manifest.toolsUsed, notes: candidateStatusNotes({ verified: loop.verified, previewReady: existsSync(join(job, 'preview.mp4')), quality: loop.quality }), backup: "", jobPath: job, candidatePath: staging, originalDigest, candidateDigest: await directoryDigest(staging),
       referencePath: reference.path, effects: manifest.effects, prompt: input.prompt, sourceName: selected?.material.material_name || input.rawVideo?.name || "Timeline clip",
       timelineStart: (selected?.segment.target_timerange.start ?? 0) / 1e6,
-      model: loop.model, access: loop.access, iterations: loop.iterations, verified: loop.verified, evidencePath: loop.evidencePath, quality: loop.quality };
+      model: loop.model, access: loop.access, iterations: loop.iterations, verified: loop.verified, evidencePath: loop.evidencePath, quality: loop.quality, diagnostic: loop.diagnostic };
   }
 }
 

@@ -10,7 +10,7 @@ export function nativeReviewCapability() {
   return { available: installed && existsSync(join(process.cwd(), 'scripts', driver)), appInstalled: installed,
     reason: installed
       ? process.platform === 'darwin'
-        ? "CapCut player inspection is available. Allow Accessibility, Screen Recording and Automation for the app or terminal that starts AI-Editor. Keep CapCut in English and the desktop unlocked. Each edit is checked in the player without exporting."
+        ? "CapCut and the Mac inspection driver are installed. Permission readiness is checked when native review starts. Allow Accessibility and Screen Recording for the app that starts AI-Editor (Terminal/iTerm or your IDE), and Automation for System Events/CapCut when requested. Confirm the launcher named by macOS. Keep CapCut in English and the desktop unlocked."
         : "Native player inspection runs on a disposable copy without exporting. Keep CapCut in English and the desktop unlocked. File checks and visual verification are reported separately."
       : "CapCut desktop was not found. Install CapCut or configure its application path. Native verification remains unavailable." };
 }

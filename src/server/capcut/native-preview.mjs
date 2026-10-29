@@ -12,6 +12,7 @@ import { exactTextTarget } from './native-export-policy.mjs';
 import { previewGeometry, playerFrame, previewSchedule, navigationSteps } from './native-preview-policy.mjs';
 import { assertPublishedEquivalent, nativeSystemFont } from './native-equivalence.mjs';
 import { runCancellableProcess } from '../../lib/cancellable-process.ts';
+import { captureFailureDiagnostic } from '../editing/diagnostics.mjs';
 const run = promisify(execFile);
 
 /** Controller-owned player inspection. Never triggers export or cloud tools. */
@@ -31,7 +32,7 @@ export async function captureNativePreview({ job, candidate, revision, start = 0
   const folder = await mkdtemp(join(job, 'native-preview-')), framesFolder = join(folder, 'frames'); await mkdir(framesFolder);
   const receiptPath = join(folder, 'capture.json');
   const receipt = { version: 1, kind: 'capcut-native-preview', candidateDigest: revision, platform: process.platform, status: 'preparing',
-    exported: false, uploaded: false, audioCaptured: false, assets, samples: [], evidenceFiles: [], startedAt: new Date().toISOString(),
+    stage: 'preflight', exported: false, uploaded: false, audioCaptured: false, assets, samples: [], evidenceFiles: [], startedAt: new Date().toISOString(),
     sampling: sampleFrames ? 'fixture samples only' : schedule.consecutive ? 'every frame, paused player inspection' : 'bounded sampled player inspection',
     limitations: ['Paused player frames do not verify real-time playback smoothness or the native audio mix.'], excerpt: { start, duration, width, height } };
   const save = async () => writeFile(receiptPath, JSON.stringify(receipt, null, 2));
@@ -40,9 +41,11 @@ export async function captureNativePreview({ job, candidate, revision, start = 0
     const ui = new NativeUI(join(folder, 'ui'), signal);
     ui.projectOnly = true;
     if (process.platform === 'darwin') await ui.perform('preflight');
+    receipt.stage = 'publish'; await save();
     onLog('Opening an isolated CapCut candidate for player inspection. No export or upload. Keep the desktop unlocked.');
-    const published = await prepareNativeCopy(candidate, revision, signal);
+    const published = await prepareNativeCopy(candidate, revision, signal, folder);
     Object.assign(receipt, { projectName: published.projectName, publishedPath: published.destination }); await save();
+    receipt.stage = 'inspect'; await save();
     let state = await ui.waitFor(published.projectName);
     if (state.words.some(w => w.text === 'Home')) {
       await ui.openProject(state, published.projectName);
@@ -50,7 +53,7 @@ export async function captureNativePreview({ job, candidate, revision, start = 0
     }
     state = await ui.perform('inspect', { projectOnly: true, protectHeader: true });
     exactTextTarget(state, published.projectName, { x: 0, y: 0, width: state.width, height: 80 * (state.scale || 1) });
-    receipt.capcutVersion = state.version; receipt.executable = state.executable; receipt.status = 'capturing'; await save();
+    receipt.capcutVersion = state.version; receipt.executable = state.executable; receipt.status = 'capturing'; receipt.stage = 'capture'; await save();
     let previous = 0;
     for (const [i, frame] of targets.entries()) {
       signal?.throwIfAborted();
@@ -82,9 +85,11 @@ export async function captureNativePreview({ job, candidate, revision, start = 0
     for (const file of [indexPath, ...sheets]) receipt.evidenceFiles.push({ path: file, sha256: await fileDigest(file) });
     if (await directoryDigest(candidate) !== revision) throw new Error('Candidate changed during native inspection.');
     // Flush native autosave before checking the actual document behind the frames.
+    receipt.stage = 'close'; await save();
     await runCancellableProcess(process.execPath, [join(process.cwd(), 'scripts/capcut-session.mjs'), 'close'],
       { cwd: process.cwd(), signal, timeoutMs: 60000, onLine: () => {} });
     const systemFont = nativeSystemFont(state.executable, process.platform);
+    receipt.stage = 'equivalence'; await save();
     const savedDraft = await assertPublishedEquivalent(candidate, published.destination, { nativeSave: true, systemFont });
     const savedPath = join(folder, 'native-saved-draft.json'); await writeFile(savedPath, JSON.stringify(savedDraft));
     receipt.evidenceFiles.push({ path: savedPath, sha256: await fileDigest(savedPath) });
@@ -93,5 +98,11 @@ export async function captureNativePreview({ job, candidate, revision, start = 0
     for (const asset of assets) if (await fileDigest(asset.path) !== asset.sha256) throw new Error('Source changed during native inspection.');
     receipt.status = 'captured'; receipt.completedAt = new Date().toISOString(); await save();
     return { receiptPath, receipt, nativeFrames: { frames: sheets, indexPath, duration, hasAudio: false } };
-  } catch (error) { receipt.status = signal?.aborted ? 'cancelled' : 'failed'; receipt.error = error.message; await save(); throw error; }
+  } catch (error) {
+    receipt.status = signal?.aborted ? 'cancelled' : 'failed'; receipt.error = String(error.message).slice(0, 12000);
+    error.nativeFailure = { ...error.nativeFailure, stage: error.nativeFailure?.stage || receipt.stage,
+      candidateDigest: revision, platform: process.platform, samples: receipt.samples.length, receiptPath };
+    receipt.diagnostic = captureFailureDiagnostic(error);
+    await save(); throw error;
+  }
 }

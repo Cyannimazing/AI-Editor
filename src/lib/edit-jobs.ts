@@ -19,6 +19,7 @@ type EditResult = Awaited<ReturnType<typeof applyNativeCapCut>>;
 type Status = "running" | "cancelling" | "cancelled" | "awaiting_approval" | "committing" | "complete" | "blocked" | "discarded" | "interrupted" | "failed";
 type EditJob = { id: string; status: Status; canCancel?: boolean; controller?: AbortController; log?: (line: string) => void;
   checkpoint?: { jobPath: string; candidatePath: string; originalDigest: string; previewReady?: boolean };
+  reviewCopy?: { projectName?: string; status: string; receiptPath?: string };
   transcript: string[]; transcriptBase?: number; result?: EditResult; error?: string; diagnostic?: ReturnType<typeof captureFailureDiagnostic>; createdAt: string; updatedAt: string; };
 export type SavedRecipe = { id: string; name: string; prompt: string; referencePath: string; effects: string[]; sourceName: string; createdAt: string;
   planPath?: string; buildDirectory?: string; sourcePath?: string; workflowVersion?: number; model?: string; access?: string; };
@@ -81,6 +82,7 @@ export async function startEditJob(input: { projectId: string; rawVideo?: File |
         savedSourcePath: recipe?.sourcePath, onLog: log, signal: controller.signal,
         onCheckpoint: async point => { job.checkpoint = point; await persist(job); } });
       job.status = job.result.verified ? "awaiting_approval" : "blocked";
+      job.diagnostic = job.result.diagnostic;
       if (!job.result.verified) job.error = undefined;
     } catch (error) {
       job.status = controller.signal.aborted ? "cancelled" : "failed";
@@ -134,7 +136,24 @@ export async function testEditJob(id: string, revision: string) {
     const job = await loadJob(id);
     if (!["awaiting_approval", "blocked"].includes(job.status) || !job.result) throw new Error("Build a candidate before opening a test copy.");
     if (job.result.candidateDigest !== revision) throw new Error("This candidate revision is stale.");
-    return await openCandidateTestCopy(job.result.candidatePath, revision);
+    try {
+      const copy = await openCandidateTestCopy(job.result.candidatePath, revision, job.result.jobPath);
+      job.reviewCopy = copy;
+      // Clear a previous opening failure while retaining the edit's native-review blocker.
+      job.diagnostic = job.result.diagnostic;
+      job.transcript.push(`Temporary copy registered as “${copy.projectName}”. Launch handoff accepted; select it in CapCut if its Home screen appears. This does not confirm native verification.`);
+      await persist(job);
+      return copy;
+    } catch (error) {
+      const reason = editingFailureMessage(error);
+      job.diagnostic = captureFailureDiagnostic(error);
+      const failed = (error as { nativeFailure?: { registered?: boolean; projectName?: string; receiptPath?: string } }).nativeFailure;
+      job.reviewCopy = { status: 'failed', receiptPath: failed?.receiptPath,
+        ...(failed?.registered ? { projectName: failed.projectName } : {}) };
+      job.transcript.push(`Temporary review copy needs attention: ${reason}`);
+      await persist(job);
+      throw new Error(`${reason}${failed?.registered ? ` The registered copy is “${failed.projectName}”; check CapCut Home.` : ''} Download diagnostics for the failed opening stage.`);
+    }
   } finally { await release(); }
 }
 export async function jobArtifact(id: string, kind: string) {

@@ -5,6 +5,24 @@ import { candidateStatusNotes, needsDesignReview, requireAudioEvidence } from '.
 import { smokeOutcome } from './smoke-outcome.mjs';
 import * as editingErrors from '../src/server/editing/errors.mjs';
 
+test('wrapped macOS driver errors retain actionable permission guidance', () => {
+  for (const [detail, expected] of [
+    ['macOS Accessibility permission is required for the application that launches AI-Editor.', /Accessibility.*System Settings/s],
+    ['macOS Screen & System Audio Recording permission is required to inspect the CapCut window.', /Screen.*Recording/s],
+    ['System Events got an error: Not authorized to send Apple events to System Events. (-1743)', /Automation.*System Events/s],
+    ['CapCut has no usable visible window. Keep its project window open.', /visible window/],
+  ]) {
+    const stderr = `/Users/tester/app/scripts/native-ui-macos.js: execution error: Error: ${detail} (-2700)`;
+    const error = Object.assign(new Error(`Command failed: /usr/bin/osascript -l JavaScript private-request.json\n${stderr}`), { stderr });
+    assert.match(editingErrors.editingFailureMessage(error), expected);
+    assert.doesNotMatch(editingErrors.editingFailureMessage(error), /Command failed|private-request|\/Users\/tester/);
+    assert.equal(editingErrors.requiresHostAttention(error), true);
+  }
+  // -2700 alone is a general JXA runtime error, not evidence of denied access.
+  const unrelated = new Error('Command failed: osascript\nexecution error: TypeError: undefined is not an object (-2700)');
+  assert.doesNotMatch(editingErrors.editingFailureMessage(unrelated), /Accessibility/);
+});
+
 test('Windows capture errors explain the obstruction and never trigger an AI editing repair', () => {
   const error = Object.assign(new Error('Command failed: powershell.exe -File native-ui-windows.ps1\nNative capture interrupted: another window covers CapCut. XamlWindow 827,0,266,71 sameProcess=False'),
     { stderr: 'Native capture interrupted: another window covers CapCut. XamlWindow 827,0,266,71 sameProcess=False\r\nAt C:\\app\\native-ui-windows.ps1:139 char:99' });

@@ -1,5 +1,15 @@
 # Technical audit addendum — 2026-10-27
 
+## 2026-10-30 — Returned Mac native-review audit
+
+The returned audit confirms a constructed 10.471667s candidate with editable 100%–130% scale curves and passing structural checks. Native review failed before window inspection because Accessibility trust was missing. Reproduced the app's reporting defect with the actual nested `osascript` error shape: its actionable message became a generic tool failure. Specific permission categories now survive that wrapper and propagate through blocked job results into the UI/downloaded diagnostics. The driver receipt retains failed stage, candidate revision, sample count and a shareable relative receipt identifier; incomplete evidence still cannot enable approval.
+
+Temporary-copy opening now journals close/publish/register/link/identity/equivalence/open stages. macOS launch waits for the `open` command to finish and records its exit code separately from the Node wrapper. Handoff success is not a visible-project or verification claim; the UI retains the registered copy name for selection on CapCut Home. A successful retry clears the old action failure while preserving the edit's native-review blocker. Early Automation errors survive bounded diagnostic-tail truncation. Two review findings were reproduced/addressed and the follow-up review found no additional blocker.
+
+The audit's candidate-level media warnings are not proof of broken publication: the existing publisher packages job-owned uploaded media, registers/links it and verifies byte/control equivalence before launch. No speculative change to media packaging or the Mac open target was made. The actual Mac window handoff and post-permission player inspection still need the tester's next run; no Mac desktop was available here. See [the permission and temporary-copy guide](macos-native-review-2026-10-30.md). No original project, desktop app, account, TCC setting or paid service was changed during this repair.
+
+Fresh Windows verification: 162 tests discovered, 161 passed and one expected POSIX-only skip; lint and the production/TypeScript build passed. Evidence logs: `.local-tools/preview-probe/native-review-final-tests.log`, `native-review-final-lint.log`, `native-review-final-build.log`. Existing build-tracing and direct-TypeScript module warnings remain. These checks validate the repair logic; they do not assert successful native Mac playback.
+
 ## 2026-10-30 — Canonical clip timing and speed interpretation repair
 
 Reproduced an engine bug that can explain the wrong-duration class: the app preferred a stale `draft_content.json` at 15.866666s while the pinned CLI selected a modern canonical document at 10.471667s. Project selection and preparation now use the same CLI snapshot/storage rules as native edits and commits. Parsed timing and raw/hash provenance are captured in one read; active documents that disagree cannot silently supply an arbitrary range. Duplicate clip/material IDs and multiple speed records are rejected instead of selecting the first entry.

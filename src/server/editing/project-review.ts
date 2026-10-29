@@ -8,6 +8,8 @@ import { referenceEvidenceContext } from './reference-context.mjs';
 import { qualityAction, combineReviews } from './quality.mjs';
 import { auditMotionFrames, buildMotionComparisons } from './motion-evidence.mjs';
 import { applyFinalProjectChecks } from './project-review-checks.mjs';
+import { captureFailureDiagnostic } from './diagnostics.mjs';
+import { editingFailureMessage } from './errors.mjs';
 
 /** Earlier clip reviews must never be reused as final-revision evidence. */
 export async function reviewFinalProjectClip(input: { result: { jobPath: string; candidatePath: string; prompt: string; iterations: number; sourceName: string; referencePath: string };
@@ -18,6 +20,7 @@ export async function reviewFinalProjectClip(input: { result: { jobPath: string;
   const revision = await directoryDigest(candidate);
   let quality = combineReviews([], plan.techniques, false, revision, [...plan.unsupported, ...(manifest.verificationGaps || [])]);
   let evidencePath = '';
+  let diagnostic: ReturnType<typeof captureFailureDiagnostic> | undefined;
   try {
     const before = (await readNativeDraft(result.candidatePath)).draft, final = (await readNativeDraft(candidate)).draft;
     const componentIds = manifest.effects.flatMap((effect: { segmentIds: string[] }) => effect.segmentIds);
@@ -50,10 +53,11 @@ export async function reviewFinalProjectClip(input: { result: { jobPath: string;
     quality = applyFinalProjectChecks(quality, audit, plan, mix);
   } catch (error) {
     signal?.throwIfAborted();
-    const reason = error instanceof Error ? error.message : String(error);
+    const reason = editingFailureMessage(error);
+    diagnostic = captureFailureDiagnostic(error);
     onLog(`Final project verification needs attention: ${reason}`);
     quality = { ...quality, decision: 'blocked', nativeVerified: false, unknowns: [...quality.unknowns, reason] };
   }
   await writeFile(join(job, 'final-project-quality.json'), JSON.stringify(quality));
-  return { quality, evidencePath, verified: qualityAction(quality, 4, 4) === 'approve' };
+  return { quality, evidencePath, diagnostic, verified: qualityAction(quality, 4, 4) === 'approve' };
 }

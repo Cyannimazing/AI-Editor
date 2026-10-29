@@ -22,4 +22,6 @@
 
 ## Next step
 
-- Push the verified timing repair as requested. Tester updates/restarts and retries the existing selected project/clip; share Download diagnostics if it still fails. No manual IDs, FFprobe or replacing footage as an app-reader workaround.
+- Timing repair was pushed as37b3d77. Returned Mac native audit confirms a built10.471667s zoom with editable100→130% keys; native inspection failed Accessibility preflight. Wrapped OS errors now retain permission guidance and safe job diagnostics. Temporary-copy stages/launch result are journaled; Mac open exit is awaited, with inner/wrapper codes distinct. Successful copy retries restore the original edit diagnostic. Publication already packages uploaded job media, so no speculative packaging change was made.
+- Final Windows verification for the native-review repair:161 passed, one expected POSIX-only skip, lint/build passed. Reviewer follow-up cleared both findings. Logs are native-review-final-* under .local-tools/preview-probe. No app/CapCut launch or original edits occurred.
+- Tester updates/restarts from the authorized launcher, enables Accessibility/Screen Recording and prompted Automation, then repeats the same disposable zoom. Actual Mac visible-open/player acceptance still requires that run. Use Download diagnostics for any remaining failure; no manual IDs/FFprobe required. See docs/macos-native-review-2026-10-30.md.

@@ -195,7 +195,13 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
       setOpenedCopy(data.projectName);
       void refresh().catch(() => undefined);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not open the test copy."); }
-    finally { setOpening(false); }
+    finally {
+      setOpening(false);
+      // This job has already stopped polling; fetch the action's new receipt/failure.
+      void apiFetch(`/api/apply-native?id=${jobId}`).then(async response => {
+        if (response.ok) { const job: Job = await response.json(); setDiagnostic(job.diagnostic); }
+      }).catch(() => undefined);
+    }
   }
 
   async function createProject() {

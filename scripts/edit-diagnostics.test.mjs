@@ -4,6 +4,22 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { captureFailureDiagnostic, buildJobDiagnosticReport } from '../src/server/editing/diagnostics.mjs';
 
+test('blocked native review downloads retain the permission and failed stage without private paths', () => {
+  const error = Object.assign(new Error('Command failed: osascript\nexecution error: Error: macOS Accessibility permission is required. (-2700)'), {
+    nativeFailure: { stage: 'preflight', candidateDigest: 'a'.repeat(64), platform: 'darwin', samples: 0,
+      receiptPath: '/Users/private/job/native-preview-123/capture.json', projectName: 'PRIVATE_TITLE' },
+  });
+  const diagnostic = captureFailureDiagnostic(error);
+  const report = buildJobDiagnosticReport({ id: 'native', status: 'blocked', diagnostic });
+  assert.equal(report.failure.code, 'NATIVE_MACOS_ACCESSIBILITY_REQUIRED');
+  assert.equal(report.failure.stage, 'native_review');
+  assert.equal(report.failure.details.stage, 'preflight');
+  assert.equal(report.failure.details.candidateDigest, 'a'.repeat(64));
+  assert.equal(report.failure.details.samples, 0);
+  assert.match(report.failure.message, /Accessibility/);
+  assert.doesNotMatch(JSON.stringify(report), /\/Users|PRIVATE_TITLE|Command failed/);
+});
+
 test('downloaded diagnostics retain measured timing and omit media, prompts and credentials', () => {
   const diagnostic = captureFailureDiagnostic(Object.assign(new Error('Clip duration mismatch'), {
     diagnostic: { version: 1, code: 'CLIP_DURATION_MISMATCH', stage: 'clip_extraction', details: {

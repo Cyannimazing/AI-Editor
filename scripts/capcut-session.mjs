@@ -1,8 +1,9 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { platformPaths } from '../src/server/platform/runtime.mjs';
+import { launchNativeApplication, launchFailureReceipt } from '../src/server/capcut/native-launch.mjs';
 
 const run = promisify(execFile);
 const [action, project] = process.argv.slice(2);
@@ -37,12 +38,15 @@ if (action === 'status') {
   if (await running()) throw new Error('Close CapCut before opening the review candidate.');
   const executable = paths.capcut;
   if (!existsSync(executable)) throw new Error('CapCut executable was not found.');
-  const child = process.platform === 'darwin'
-    ? spawn('/usr/bin/open', ['-a', executable, draft], { detached: true, stdio: 'ignore' })
-    : spawn(executable, [draft], { detached: true, stdio: 'ignore', windowsHide: false });
-  await new Promise((done, reject) => { child.once('spawn', done); child.once('error', reject); });
-  child.unref();
-  process.stdout.write(JSON.stringify({ opened: resolve(project) }));
+  try {
+    const launch = process.platform === 'darwin'
+      ? await launchNativeApplication('/usr/bin/open', ['-a', executable, draft], { waitForExit: true })
+      : await launchNativeApplication(executable, [draft]);
+    process.stdout.write(JSON.stringify({ ...launch, project: resolve(project) }));
+  } catch (error) {
+    process.stderr.write(JSON.stringify(launchFailureReceipt(error)) + '\n');
+    throw error;
+  }
 } else {
   throw new Error('Usage: capcut-session.mjs status | close | open <project>');
 }
