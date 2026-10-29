@@ -90,6 +90,8 @@ For a production-mode local server, use `pnpm build` followed by `pnpm start`. B
 
 The default uses the app's CLI, local media tools and your existing Codex account. AI reasoning uses that account's allowance; instructions and selected reference/preview frames are sent to Codex. Local rendering does not mean offline AI inference.
 
+The lead editing agent uses **GPT-6 Astra**, with medium reasoning and standard speed. Focused specialists and independent reviewers keep their separate models. The app checks your account's model access before each worker starts; it never silently falls back to another model or billing method. Astra consumes your existing Codex allowance and may use more of it than Sol. New runs use this setting after you update and restart the app; it does not change this development chat's model.
+
 The app starts a private local stdio MCP connection per editing role. Codex can inspect individual reference frames, discover installed command contracts and no-cost catalog resources, test curves, build native candidate layers and read back the actual saved controls. Only the lead can write the candidate; reviewers are read-only. The official Codex app/CLI must include its bundled `codex-code-mode-host`. No separate CapCut MCP account or paid backend is required.
 
 CapCut sign-in is optional for local draft editing. Its official plugin offers online templates, shared web drafts, captions and media generation. These are plugin capabilities, not completed app integrations. Cloud workflows may upload media. Paid services, credit purchases and paid generation are disabled. Connecting an account does not enable uploads or spending.

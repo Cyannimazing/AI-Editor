@@ -3,6 +3,7 @@
 import { apiFetch } from "@/lib/api-client";
 import { updateReferencePrompt } from "@/lib/reference-prompts.mjs";
 import { readableProgress } from "@/lib/edit-progress.mjs";
+import { editorPolicy } from "@/lib/editor-policy.mjs";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ClipSelection } from './clip-selection';
@@ -268,7 +269,7 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
 
       <section className="rounded-2xl border border-white/10 bg-[#111b2a] p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div><h2 className="text-lg font-semibold">Run the edit</h2><p className="mt-1 text-xs font-medium text-emerald-300">GPT-6.1 Sol · Restricted candidate workspace</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400">The editor builds a separate candidate, then reviewers check the evidence. Watch the design preview here. Applying changes requires native CapCut verification and your approval.</p>{status === "cancelled" && <p className="mt-2 text-sm text-amber-200" role="status">Run cancelled. No edit was written to CapCut.</p>}</div>
+          <div><h2 className="text-lg font-semibold">Run the edit</h2><p className="mt-1 text-xs font-medium text-emerald-300">{editorPolicy.displayName} · Restricted candidate workspace</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400">The editor builds a separate candidate, then reviewers check the evidence. Watch the design preview here. Applying changes requires native CapCut verification and your approval.</p>{status === "cancelled" && <p className="mt-2 text-sm text-amber-200" role="status">Run cancelled. No edit was written to CapCut.</p>}</div>
           <div className="flex flex-wrap gap-3"><button className={button} disabled={!setupComplete || running || !targetReady || !prompt.trim()} onClick={() => void runEdit()}>{starting ? "Starting…" : status === "cancelling" ? "Cancelling…" : running ? "Codex is editing…" : "Run"}</button>
           {jobId && running && <button className="min-h-11 rounded-xl border border-amber-300/40 px-5 py-3 text-sm font-semibold text-amber-100 hover:bg-amber-300/10 disabled:cursor-not-allowed disabled:opacity-40" disabled={!canCancel || status === "cancelling"} onClick={() => void cancelRun()}>{status === "cancelling" ? "Stopping tools…" : canCancel ? "Cancel run" : "Finishing write…"}</button>}</div>
         </div>

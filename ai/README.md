@@ -11,14 +11,14 @@ Documentation and installed tools do not automatically add execution adapters. T
 | Role | Context | Model / initial reasoning |
 | --- | --- | --- |
 | Project Planner | `roles/planner.md` | GPT-6.1 Sol / medium |
-| Lead Editor | `roles/editor.md` | GPT-6.1 Sol / medium |
+| Lead Editor | `roles/editor.md` | GPT-6 Astra / medium |
 | Motion / Effects | `roles/motion.md` | GPT-6.1 Sol / medium |
 | Captions | `roles/captions.md` | GPT-6 Luna / high |
 | Audio | `roles/audio.md` | GPT-6 Luna / high |
 | Visual Reviewer | `roles/reviewer.md` | GPT-6.1 Terra / medium |
 | Quality Manager | `roles/manager.md` | GPT-6.1 Sol / medium |
 
-Runtime policies in `src/server/codex/roles.ts` are authoritative. Check actual availability; never silently substitute models or billing methods. Standard speed is the default. The implementation chat's model is separate from app worker roles.
+Runtime policies in `src/server/codex/roles.ts` are authoritative. The lead editor reads `src/lib/editor-policy.mjs`, shared with the workspace label and job receipts. It uses GPT-6 Astra through the signed-in Codex CLI account; specialist and independent review models retain their focused roles. Check actual availability; never silently substitute models or billing methods. Standard speed is the default. The implementation chat's model is separate from app worker roles.
 
 The app now starts a per-job local stdio MCP server. Codex can inspect timed frames, evaluate proposed curves and read the native candidate. Only the lead has the validated candidate-build tool. See `workflows/editing.md` for the tool workflow and `../docs/local-mcp-editing-research.md` for the investigated failures, implementation and evidence. References transfer editing techniques; they do not require scene cloning.
 

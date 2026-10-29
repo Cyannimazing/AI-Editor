@@ -6,6 +6,7 @@ import { structuredPolicyArgs } from '../src/server/codex/structured-policy.mjs'
 import { editingMcpArgs } from '../src/server/codex/editing-mcp-config.mjs';
 import { mediaTool, findExecutable } from '../src/server/platform/runtime.mjs';
 import { codexTransportArgs } from '../src/server/codex/transport.mjs';
+import { editorPolicy } from '../src/lib/editor-policy.mjs';
 import { initDraft } from '../toolchain/node_modules/capcut-cli/dist/factory.js';
 import { loadDraft } from '../toolchain/node_modules/capcut-cli/dist/draft.js';
 const root = process.cwd(), run = promisify(execFile), executable = findExecutable('codex');
@@ -25,8 +26,8 @@ await writeFile(join(job, 'motion-reference.json'), JSON.stringify({ samples: []
 const schema = join(job, 'schema.json'), output = join(job, 'answer.json');
 await writeFile(schema, JSON.stringify({ type: 'object', additionalProperties: false, required: ['applied', 'readBack', 'note'], properties: { applied: { type: 'boolean' }, readBack: { type: 'boolean' }, note: { type: 'string' } } }));
 const env = { ...process.env }; for (const key of Object.keys(env)) if (/(API_KEY|ACCESS_TOKEN|SECRET|PASSWORD)/i.test(key)) delete env[key];
-const args = ['exec', '--ignore-user-config', '--ignore-rules', '--strict-config', ...codexTransportArgs(), '--model', 'gpt-6.1-sol',
-  '--config', 'model_reasoning_effort="medium"', '--config', 'service_tier="default"', ...structuredPolicyArgs(job, process.platform, true), ...editingMcpArgs(job, 'editor'),
+const args = ['exec', '--ignore-user-config', '--ignore-rules', '--strict-config', ...codexTransportArgs(), '--model', editorPolicy.model,
+  '--config', `model_reasoning_effort="${editorPolicy.effort}"`, '--config', 'service_tier="default"', ...structuredPolicyArgs(job, process.platform, true), ...editingMcpArgs(job, 'editor'),
   '--ephemeral', '--skip-git-repo-check', '--json', '--output-schema', schema, '--output-last-message', output, '-'];
 const plan = { version: 2, summary: 'Native zoom with rebound', source: { scale: 1, x: 0, y: 0, rotation: 0, opacity: 1, volume: 1,
   keyframes: [{ property: 'scale', time: 0, value: 1, easing: 'linear' }, { property: 'scale', time: 0.2, value: 1.3, easing: 'ease-out' }, { property: 'scale', time: 0.35, value: 1.1, easing: 'ease-in-out' }] },
@@ -44,6 +45,6 @@ const applied = calls.some(call => call.tool === 'apply_edit_plan' && call.ok);
 const readBack = calls.some(call => call.tool === 'inspect_timeline' && call.ok);
 const protectedUnchanged = await readFile(protectedFile, 'utf8') === 'untouched';
 const passed = code === 0 && applied && readBack && protectedUnchanged && loadDraft(candidate).draft.tracks.some(track => track.segments.some(segment => segment.common_keyframes?.length === 2));
-await writeFile(`.local-tools/local-mcp-${securityProbe ? 'security' : 'smoke'}-result.json`, JSON.stringify({ job, candidate, passed, code, applied, readBack, protectedUnchanged }));
-console.log(JSON.stringify({ job, passed, code, applied, readBack, protectedUnchanged, diagnostics: passed ? undefined : stderr.slice(-1800) }));
+await writeFile(`.local-tools/local-mcp-${securityProbe ? 'security' : 'smoke'}-result.json`, JSON.stringify({ job, candidate, model: editorPolicy.model, effort: editorPolicy.effort, passed, code, applied, readBack, protectedUnchanged }));
+console.log(JSON.stringify({ job, model: editorPolicy.model, effort: editorPolicy.effort, passed, code, applied, readBack, protectedUnchanged, diagnostics: passed ? undefined : stderr.slice(-1800) }));
 process.exitCode = passed ? 0 : 1;

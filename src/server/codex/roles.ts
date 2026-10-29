@@ -1,10 +1,11 @@
 import { join } from "node:path";
 import { loadRoleInstructions } from "./context.mjs";
 import { toolKnowledge, toolKnowledgeSummary } from "../setup/tool-knowledge";
+import { editorPolicy } from "../../lib/editor-policy.mjs";
 
 export const roles = {
   planner: { model: "gpt-6.1-sol", effort: "medium", writes: false },
-  editor: { model: "gpt-6.1-sol", effort: "medium", writes: false },
+  editor: { model: editorPolicy.model, effort: editorPolicy.effort, writes: false },
   motion: { model: "gpt-6.1-sol", effort: "medium", writes: false },
   captions: { model: "gpt-6-luna", effort: "high", writes: false },
   audio: { model: "gpt-6-luna", effort: "high", writes: false },

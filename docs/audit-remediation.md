@@ -1,5 +1,13 @@
 # Technical audit addendum — 2026-10-27
 
+## 2026-10-30 — Astra lead editor and returned clip-duration audit
+
+The supplied Mac audit records a 15.866666s source/target interval pointing to a 10.471667s video, with 10.533333s prepared output. This confirms materially missing footage for that run, separate from the prior low-FPS reproduction. The reason for the inconsistent source/timeline mapping is not yet established. No duration tolerance, mapping or playback behavior was relaxed; the tester can relink/correct the affected clip in CapCut or use the fresh project already planned. See the [clip diagnostic follow-up](clip-duration-diagnostics-2026-10-29.md).
+
+At the user's request, the app's lead editing worker now uses `gpt-6-astra`, with the existing medium reasoning default, bounded high escalation and standard tier. One public policy supplies the worker model, workspace label, job receipts and current local-MCP smoke command. Specialist/review roles and account-only authentication, permissions, original protection and approval/evidence gates are unchanged.
+
+The signed-in test account listed Astra with medium support. A live disposable Astra/MCP trial completed inspection, keyframe evaluation, candidate construction and native read-back: four successful calls, separate X/Y native scale curves and an unchanged protected file. It did not open CapCut or use a personal project. Windows verification: 139 automated tests passed, one expected POSIX-only skip, lint and production/TypeScript build passed. The build retains five existing broad filesystem-tracing warnings. Static review found no runtime/security blockers. These checks establish model/tool integration, not Mac playback quality or a visual-quality improvement on the tester's footage.
+
 ## 2026-10-29 — Clip preparation timing and app diagnostics
 
 The first Mac editing screenshots exposed an uninformative preparation failure. The exact media measurements were absent. A disposable low-FPS source reproduced the same guard failure (2.21s requested, 2.40s prepared). Extraction is now a separate controller service that prepares working media at project FPS, measures video/container duration with frame-aware tolerance, and records the source/timeline/prepared timing. Materially missing footage is still rejected. The original source file and timeline values are retained during preparation.

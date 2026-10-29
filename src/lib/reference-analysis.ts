@@ -7,8 +7,9 @@ import { roles, workerContext, type Role } from "../server/codex/roles";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runCancellableProcess } from "./cancellable-process";
+import { editorPolicy } from "./editor-policy.mjs";
 
-export const editingAgent = { model: "gpt-6.1-sol", label: "Lead Editor", access: "Job-scoped local MCP editing; original projects protected" } as const;
+export const editingAgent = editorPolicy;
 export async function codexExecutable() {
   const path = findExecutable("codex");
   if (!path) throw new Error("Codex CLI is missing. Complete setup first.");
