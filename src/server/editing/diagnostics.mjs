@@ -2,6 +2,8 @@ import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { editingFailureMessage } from './errors.mjs';
 
+const extractionCodes = ['CLIP_DURATION_MISMATCH', 'CLIP_EXTRACTION_FAILED', 'SOURCE_INTERVAL_EXCEEDS_MEDIA', 'CLIP_SPEED_CONFLICT'];
+
 function redacted(value) {
   let result = String(value || '');
   for (const path of [process.cwd(), homedir()]) for (const spelling of [pathToFileURL(path).href, path, path.replaceAll('\\', '/')]) result = result.replaceAll(spelling, '[local]');
@@ -10,7 +12,7 @@ function redacted(value) {
 }
 
 export function captureFailureDiagnostic(error) {
-  const measured = error?.diagnostic?.stage === 'clip_extraction' && ['CLIP_DURATION_MISMATCH', 'CLIP_EXTRACTION_FAILED'].includes(error.diagnostic.code)
+  const measured = error?.diagnostic?.stage === 'clip_extraction' && extractionCodes.includes(error.diagnostic.code)
     ? JSON.parse(JSON.stringify(error.diagnostic.details)) : undefined;
   return { version: 1, stage: measured ? 'clip_extraction' : 'editing',
     code: measured ? error.diagnostic.code : 'EDIT_FAILED', message: redacted(editingFailureMessage(error)),
@@ -21,7 +23,7 @@ export function captureFailureDiagnostic(error) {
 /** Sharing report: prompts, media and the full job object are not exported. */
 export function buildJobDiagnosticReport(job) {
   const diagnostic = job.diagnostic;
-  const extraction = diagnostic?.stage === 'clip_extraction' && ['CLIP_DURATION_MISMATCH', 'CLIP_EXTRACTION_FAILED'].includes(diagnostic.code);
+  const extraction = diagnostic?.stage === 'clip_extraction' && extractionCodes.includes(diagnostic.code);
   // Generic planner/reviewer error prose can quote private requested captions.
   // Keep that prose in the local UI; exports use a classification instead.
   const message = extraction ? 'Clip preparation stopped. See the measured source and timeline timing below.'

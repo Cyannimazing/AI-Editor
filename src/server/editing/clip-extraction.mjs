@@ -12,21 +12,63 @@ export async function probeClipMedia(path, signal) {
   return JSON.parse(stdout);
 }
 
-/** Controller-owned working media; original draft/media are never written. */
-export async function extractTimelineClip({ source, output, job, segment, fps = 30, signal, onLog = (/** @type {string} */ line) => { void line; } }) {
+/** Controller-owned working media; original draft/media are never written.
+ * @param {{ source: string, output: string, job: string,
+ * segment: {target_timerange: {start: number, duration: number}, source_timerange?: {start?: number, duration?: number}, speed?: number, reverse?: boolean},
+ * mapping?: Record<string, unknown>, companionSpeed?: number, fps?: number, signal?: AbortSignal, onLog?: (line: string) => void }} options
+ */
+export async function extractTimelineClip({ source, output, job, segment, mapping = undefined, companionSpeed = undefined, fps = 30, signal, onLog = (/** @type {string} */ line) => { void line; } }) {
   const targetSeconds = segment.target_timerange.duration / 1e6;
-  const sourceSeconds = (segment.source_timerange?.duration ?? segment.target_timerange.duration) / 1e6;
-  const sourceStart = (segment.source_timerange?.start ?? 0) / 1e6, speed = sourceSeconds / targetSeconds;
+  const declaredSpeed = segment.speed ?? companionSpeed ?? 1;
+  const serializedSourceSeconds = segment.source_timerange?.duration / 1e6;
+  let sourceSeconds = segment.source_timerange?.duration == null ? targetSeconds * declaredSpeed : serializedSourceSeconds;
+  const sourceStart = (segment.source_timerange?.start ?? 0) / 1e6;
+  let speed = sourceSeconds / targetSeconds;
   if (!Number.isFinite(speed) || speed <= 0 || !Number.isFinite(targetSeconds) || targetSeconds < 0.1
     || !Number.isFinite(sourceStart) || sourceStart < 0 || !Number.isFinite(fps) || fps < 1 || fps > 120) throw new Error('The selected clip has invalid timing or project frame rate.');
   if (resolve(source) === resolve(output) || resolve(output) !== resolve(job, 'raw.mp4')) throw new Error('Clip preparation requires a separate job-owned raw.mp4.');
   const original = await probeClipMedia(source, signal);
+  const numberOrNull = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
   const report = { version: 1, stage: 'clip_extraction', status: 'preparing',
-    timeline: { targetSeconds, sourceSeconds, sourceStart, speed, reverse: Boolean(segment.reverse), fps }, original };
+    timeline: { targetSeconds, sourceSeconds, sourceStart, speed, reverse: Boolean(segment.reverse), fps },
+    timing: { sourceDurationBasis: segment.source_timerange?.duration == null ? 'declared_constant_speed' : 'source_timerange',
+      serializedSourceRange: segment.source_timerange ? { start: numberOrNull(segment.source_timerange.start), duration: numberOrNull(segment.source_timerange.duration) } : null,
+      serializedTargetRange: { start: numberOrNull(segment.target_timerange.start), duration: numberOrNull(segment.target_timerange.duration) },
+      declaredSpeed: numberOrNull(segment.speed), companionSpeed: numberOrNull(companionSpeed) }, ...(mapping ? { mapping } : {}), original };
   const save = () => writeFile(join(job, 'clip-extraction-report.json'), JSON.stringify(report, null, 2));
   const failure = (message, code) => Object.assign(new Error(message), {
     diagnostic: { version: 1, stage: 'clip_extraction', code, details: report },
   });
+  await save();
+  const sourceVideo = original.streams?.find(stream => stream.codec_type === 'video');
+  const containerDuration = Number(original.format?.duration), videoDuration = Number(sourceVideo?.duration);
+  const streamOffset = Math.max(0, Number(sourceVideo?.start_time || 0) - Number(original.format?.start_time || 0));
+  const availableSeconds = Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration + streamOffset : containerDuration;
+  const sourceTolerance = 1 / fps + 0.025;
+  const sourceRangeUnretimed = Math.abs(serializedSourceSeconds - targetSeconds) <= 0.000002;
+  // Only explicit non-unit native speed can evidence an unretimed default
+  // source range. Never invent playback speed from the available file length.
+  if (sourceStart + sourceSeconds > availableSeconds + sourceTolerance && sourceRangeUnretimed
+    && Number.isFinite(declaredSpeed) && declaredSpeed > 0 && declaredSpeed !== 1
+    && sourceStart + targetSeconds * declaredSpeed <= availableSeconds + sourceTolerance) {
+    sourceSeconds = targetSeconds * declaredSpeed; speed = declaredSpeed;
+    Object.assign(report.timeline, { sourceSeconds, speed }); report.timing.sourceDurationBasis = 'declared_constant_speed';
+    onLog(`Using the clip's declared ${declaredSpeed}× playback speed to interpret its unretimed source range. Original timeline values remain unchanged.`);
+  }
+  report.bounds = { requestedSourceEnd: sourceStart + sourceSeconds, availableSeconds,
+    deficitSeconds: Math.max(0, sourceStart + sourceSeconds - availableSeconds), toleranceSeconds: sourceTolerance };
+  const stop = async (code, message) => { report.status = code.toLowerCase(); await save(); throw failure(message, code); };
+  if (!Number.isFinite(declaredSpeed) || declaredSpeed <= 0 || companionSpeed != null && (!Number.isFinite(companionSpeed) || companionSpeed <= 0
+    // The pinned CLI leaves a neutral 1x companion when retiming a segment.
+    || segment.speed != null && companionSpeed !== 1 && Math.abs((declaredSpeed - companionSpeed) * targetSeconds) > sourceTolerance)) {
+    await stop('CLIP_SPEED_CONFLICT', 'The selected clip has contradictory native playback speeds. Download diagnostics for the serialized timing.');
+  }
+  if (Number.isFinite(availableSeconds) && availableSeconds > 0 && report.bounds.deficitSeconds > sourceTolerance) {
+    await stop('SOURCE_INTERVAL_EXCEEDS_MEDIA', `The selected timeline requests source interval ${sourceStart.toFixed(6)}–${(sourceStart + sourceSeconds).toFixed(6)}s, but the linked video contains ${availableSeconds.toFixed(6)}s. The app has not extended the video. Download diagnostics to trace the selected timeline and source.`);
+  }
+  if ((segment.speed != null || companionSpeed != null) && Math.abs(sourceSeconds - targetSeconds * declaredSpeed) > sourceTolerance) {
+    await stop('CLIP_SPEED_CONFLICT', 'The selected clip\'s source range and native playback speed disagree. Download diagnostics for the serialized timing.');
+  }
   await save();
   onLog(`Preparing ${targetSeconds.toFixed(6)}s at project rate ${fps} FPS; source interval ${sourceStart.toFixed(6)}–${(sourceStart + sourceSeconds).toFixed(6)}s, playback ${speed.toFixed(6)}×.`);
   const hasAudio = original.streams?.some(stream => stream.codec_type === 'audio');

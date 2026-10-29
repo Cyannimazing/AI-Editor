@@ -17,12 +17,12 @@ function assertClosed() {
   }
 }
 
-export async function activeDraft(project) {
-  const { loadDraft } = await import('../toolchain/node_modules/capcut-cli/dist/draft.js');
+export async function activeDraft(project, snapshot = false) {
+  const { loadDraft, loadedDraftStore } = await import('../toolchain/node_modules/capcut-cli/dist/draft.js');
   const { draft, filePath } = loadDraft(project, { activeTimeline: existsSync(join(project, 'Timelines')) });
   const offset = relative(resolve(project), filePath);
   if (offset.startsWith(`..${sep}`) || isAbsolute(offset)) throw new Error('Draft escapes project directory.');
-  return { file: filePath, draft };
+  return { file: filePath, draft, ...(snapshot ? { raw: loadedDraftStore(filePath).canonical.raw } : {}) };
 }
 
 async function draftFiles(project, folder = project) {
@@ -179,9 +179,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   if (!project) throw new Error('Expected a project directory.');
   if (action === 'digest') process.stdout.write(await draftDigest(project));
   else if (action === 'active') process.stdout.write(JSON.stringify(await activeDraft(project)));
+  else if (action === 'snapshot') process.stdout.write(JSON.stringify(await activeDraft(project, true)));
   else if (action === 'isolate') await isolateCandidate(project);
   else if (action === 'commit' && destination) await commitCandidate(project, destination);
   else if (action === 'publish' && destination) await publishCandidate(project, destination);
   else if (action === 'link-media') await linkPublishedMedia(project);
-  else throw new Error('Usage: capcut-draft.mjs digest|active|isolate <project> | commit <candidate> <destination>');
+  else throw new Error('Usage: capcut-draft.mjs digest|active|snapshot|isolate <project> | commit <candidate> <destination>');
 }

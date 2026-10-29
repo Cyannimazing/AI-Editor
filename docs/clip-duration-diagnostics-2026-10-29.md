@@ -1,5 +1,23 @@
 # Clip preparation and downloadable diagnostics — 29 October 2026
 
+## Latest engine repair — 30 October 2026
+
+The project reader had a reproducible duration-selection defect: it preferred `draft_content.json`, while the installed CapCut CLI can select a different modern canonical document. A disposable project with 15.866666s in an old mirror and 10.471667s in the canonical document made the app read 15.866666s. Project listing, selected-clip preparation, native compilation and commits now use the same CLI storage rules. The selected document's parsed content and raw provenance come from one snapshot, preventing an autosave from mixing two revisions. A selected clip retains its own range even when the complete project is longer.
+
+Constant-speed handling also needed correction. A missing source duration now uses the explicit native playback speed. A default source range that was not retimed may be interpreted from an explicit non-unit speed only when that interpretation fits the actual media. The engine does not derive a new speed from file length. Conflicting source/speed data, duplicate clip/material IDs and multiple referenced speed records are rejected before extraction. Genuinely short source intervals receive `SOURCE_INTERVAL_EXCEEDS_MEDIA` before FFmpeg writes a working video. Reports distinguish serialized and effective ranges/speeds and include hashed document, timeline, track, clip, material and source-path identity without exposing local paths.
+
+The source video supplied on the Desktop was probed read-only and matches the Mac audit: 10.471667s and 315 frames. A disposable trial through the engine's extraction/compiler services produced a 10.5s CFR working copy and an exact **10.471667s native candidate**, with separate editable X/Y scale keyframes from 100% to 130%, an audio stream and an unchanged original SHA-256. It did not open CapCut or change a personal project. Receipt: `.local-tools/preview-probe/duration-audit-source-trial.json`.
+
+A second trial exercised selected-project resolution as well: a disposable project's stale mirror contained 15.866666s while its canonical document and selected clip contained 10.471667s. The app selected `template-2.tmp`, prepared the supplied video and merged native X/Y 100%–130% keyframes into the selected segment at exactly 10471667µs. Both source-project documents and the supplied video retained their original hashes. Receipt: `.local-tools/preview-probe/timing-selected-clip-trial.json`. These are engine-service/compiler trials, without AI design or native desktop playback.
+
+The installed CLI's factory creates a neutral 1× speed companion; its compiler can retime `segment.speed` without changing that companion. The extractor respects the segment's explicit speed in that case. Multiple speed records and conflicting non-neutral speeds remain ambiguous. Timing diagnostics keep numeric fields only, preventing malformed project metadata from inserting arbitrary private text into a shared report.
+
+This proves and repairs engine defects that can produce the reported class of mismatch. The failed Mac project's serialized documents have not been supplied, so the audit alone cannot prove which defect was present in that particular project. Retry the **existing selected project/clip** after updating and restarting. If preparation still fails, send the new **Download diagnostics** report; it now identifies the exact canonical document and timing interpretation. There is no need to replace the footage merely to work around an app-reader defect.
+
+The sections below retain the earlier investigation and its evidence limits.
+
+Release checks for this repair: **153 tests passed, one POSIX-only skip**, lint and production/TypeScript build passed on Windows. The code paths use the shared Windows/macOS Node and CLI adapters. These checks and engine-service trials do not constitute Mac desktop playback acceptance.
+
 The Mac tester's screenshots show preparation stopping before any AI editing session with “The extracted clip did not match its timeline duration.” The screenshots do not contain the measured duration or source probe, so they do not establish the exact cause for that file.
 
 ## Reproduced defect and repair

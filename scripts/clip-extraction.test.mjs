@@ -6,14 +6,15 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { mediaTool } from '../src/server/platform/runtime.mjs';
 import { extractTimelineClip } from '../src/server/editing/clip-extraction.mjs';
+import { captureFailureDiagnostic, buildJobDiagnosticReport } from '../src/server/editing/diagnostics.mjs';
 
 const run = promisify(execFile);
-async function fixture(t, rate = 30, variable = false) {
+async function fixture(t, rate = 30, variable = false, duration = 3) {
   const base = join(process.cwd(), '.local-tools/native-assets'); await mkdir(base, { recursive: true });
   const job = await mkdtemp(join(base, 'test-extraction-')); t.after(() => rm(job, { recursive: true, force: true }));
   const source = join(job, 'original.mp4'), output = join(job, 'raw.mp4');
-  await run(mediaTool('ffmpeg'), ['-v', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=s=160x120:r=${rate}:d=3`,
-    '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+  await run(mediaTool('ffmpeg'), ['-v', 'error', '-y', '-f', 'lavfi', '-i', `testsrc2=s=160x120:r=${rate}:d=${duration}`,
+    '-f', 'lavfi', '-i', `sine=frequency=440:duration=${duration}`,
     ...(variable ? ['-vf', 'select=if(lt(t\\,1.5)\\,not(mod(n\\,5))\\,1)', '-fps_mode', 'vfr'] : []),
     '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', source],
   { timeout: 30000, windowsHide: true });
@@ -70,13 +71,77 @@ test('variable-rate footage and constant-speed reverse clips retain timeline dur
 test('a materially short source remains a failure with measured timing and a saved diagnostic', async t => {
   const files = await fixture(t), segment = clip(2, 2);
   await assert.rejects(extractTimelineClip({ ...files, segment, fps: 30 }), error => {
-    assert.match(error.message, /expected 2\.000.*prepared 1\./i);
-    assert.equal(error.diagnostic.code, 'CLIP_DURATION_MISMATCH');
+    assert.match(error.message, /source.*interval|timeline.*source/i);
+    assert.equal(error.diagnostic.code, 'SOURCE_INTERVAL_EXCEEDS_MEDIA');
     assert.equal(error.diagnostic.details.timeline.targetSeconds, 2);
-    assert.ok(error.diagnostic.details.measured.containerSeconds < 1.1);
+    assert.ok(error.diagnostic.details.bounds.deficitSeconds > 0.9);
     return true;
   });
   const report = JSON.parse(await readFile(join(files.job, 'clip-extraction-report.json'), 'utf8'));
-  assert.equal(report.status, 'duration_mismatch');
+  assert.equal(report.status, 'source_interval_exceeds_media');
+  await assert.rejects(readFile(files.output), { code: 'ENOENT' });
   assert.ok(!JSON.stringify(report).includes(files.source));
+});
+
+test('a missing source range uses declared constant speed rather than assuming target duration', async t => {
+  const files = await fixture(t), segment = clip(0, 4);
+  delete segment.source_timerange; segment.speed = 0.5;
+  const before = structuredClone(segment), result = await extractTimelineClip({ ...files, segment });
+  assert.ok(Math.abs(Number(result.probe.format.duration) - 4) < 0.06);
+  assert.equal(result.report.timeline.sourceSeconds, 2);
+  assert.equal(result.report.timeline.speed, 0.5);
+  assert.deepEqual(segment, before);
+});
+
+test('an out-of-bounds unretimed range can use explicit native constant-speed evidence', async t => {
+  const files = await fixture(t, 30, false, 10.47), segment = clip(0, 15.866666);
+  segment.speed = 0.66;
+  const before = structuredClone(segment), result = await extractTimelineClip({ ...files, segment });
+  assert.ok(Math.abs(Number(result.probe.format.duration) - 15.866666) < 0.06);
+  assert.equal(result.report.timeline.speed, 0.66);
+  assert.equal(result.report.timing.sourceDurationBasis, 'declared_constant_speed');
+  assert.equal(result.report.timing.serializedSourceRange.duration, 15866666);
+  assert.deepEqual(segment, before);
+});
+
+test('contradictory constant speed and an in-bounds source range cannot silently retime footage', async t => {
+  const files = await fixture(t), segment = clip(0, 2); segment.speed = 0.5;
+  await assert.rejects(extractTimelineClip({ ...files, segment }), error => {
+    assert.equal(error.diagnostic.code, 'CLIP_SPEED_CONFLICT'); return true;
+  });
+  await assert.rejects(readFile(files.output), { code: 'ENOENT' });
+});
+
+test('companion speed resolves a missing range but a conflicting native speed is rejected', async t => {
+  const files = await fixture(t), segment = clip(0, 4);
+  delete segment.source_timerange; delete segment.speed;
+  const result = await extractTimelineClip({ ...files, segment, companionSpeed: 0.5 });
+  assert.ok(Math.abs(Number(result.probe.format.duration) - 4) < 0.06);
+  assert.equal(result.report.timeline.sourceSeconds, 2);
+  assert.equal(result.report.timing.companionSpeed, 0.5);
+  segment.speed = 1;
+  await assert.rejects(extractTimelineClip({ ...files, segment, companionSpeed: 0.5 }), error => {
+    assert.equal(error.diagnostic.code, 'CLIP_SPEED_CONFLICT'); return true;
+  });
+});
+
+test('malformed native timing fields cannot put arbitrary project text in shared diagnostics', async t => {
+  const files = await fixture(t), segment = clip(0, 2);
+  segment.speed = { privateNote: 'PRIVATE_TIMING_TEXT' }; segment.target_timerange.start = 'PRIVATE_TIMING_TEXT';
+  await assert.rejects(extractTimelineClip({ ...files, segment }), error => {
+    const report = buildJobDiagnosticReport({ id: 'timing', status: 'failed', diagnostic: captureFailureDiagnostic(error) });
+    assert.equal(report.failure.code, 'CLIP_SPEED_CONFLICT');
+    assert.ok(!JSON.stringify(report).includes('PRIVATE_TIMING_TEXT')); return true;
+  });
+});
+
+test('the CLI default 1x companion does not override a declared constant-speed segment', async t => {
+  // The installed compile.js retimes segment.speed/source_timerange while
+  // factory.js retains the neutral 1x companion created with every video.
+  const files = await fixture(t), segment = clip(0, 4);
+  segment.source_timerange.duration = 2000000; segment.speed = 0.5;
+  const result = await extractTimelineClip({ ...files, segment, companionSpeed: 1 });
+  assert.ok(Math.abs(Number(result.probe.format.duration) - 4) < 0.06);
+  assert.equal(result.report.timeline.speed, 0.5);
+  assert.equal(result.report.timing.companionSpeed, 1);
 });

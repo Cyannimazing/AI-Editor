@@ -124,10 +124,10 @@ export async function applyNativeCapCut(input: ApplyInput): Promise<NativeEditRe
   activeProjects.add(input.projectId); desktopInUse = true;
   try {
     if (!input.projectId.startsWith('local:')) await capcutSession('close', undefined, input.signal);
-    const project = (await listProjects()).find(item => item.id === input.projectId);
+    const project = (await listProjects(true, input.signal)).find(item => item.id === input.projectId);
     if (!project) throw new Error('Selected project is unavailable. Refresh projects.');
     const selection = resolveEditSelection(project, input);
-    const snapshot = await readProjectDraft(project.id);
+    const snapshot = await readProjectDraft(project.id, input.signal);
     await assertNoLinks(project.path);
     const originalDigest = await directoryDigest(project.path);
     input.onLog?.(`Editing destination: “${project.name}”. Scope: ${selection.mode === 'project' ? 'Entire active timeline' : selection.mode === 'clips' ? `${selection.clipIds.length} selected clips` : 'New footage'}. Approval saves back to this project.`);
@@ -192,7 +192,7 @@ async function buildNativeClip(input: ApplyInput, context: ProjectContext) {
   {
     input.onLog?.("Preparing an isolated candidate. The original project will remain unchanged.");
     const { project, snapshot, originalDigest } = context;
-    const selected = input.clipId ? await resolveTimelineClip(project.id, input.clipId) : null;
+    const selected = input.clipId ? await resolveTimelineClip(project.id, input.clipId, input.signal) : null;
     if (project.hasTimelineContent && !selected) throw new Error("Select the timeline clip to edit in this project.");
     if (selected && selected.draft.materials?.speeds?.some((speed) =>
       selected.segment.extra_material_refs?.includes(speed.id) && speed.curve_speed)) {
@@ -211,6 +211,7 @@ async function buildNativeClip(input: ApplyInput, context: ProjectContext) {
     if (selected) {
       input.onLog?.(`Preparing only ${selected.material.material_name || "the selected clip"} at ${(selected.segment.target_timerange.start / 1_000_000).toFixed(2)}s on the timeline.`);
       await extractTimelineClip({ source: selected.mediaPath, output: source, job, segment: selected.segment,
+        mapping: selected.mapping, companionSpeed: selected.companionSpeed,
         fps: selected.draft.fps ?? 30, signal: input.signal, onLog: input.onLog });
     } else await writeFile(source, Buffer.from(await input.rawVideo!.arrayBuffer()));
     const { stdout } = await run(ffprobe(), ["-v", "error", "-show_entries", "format=duration:stream=codec_type,width,height,r_frame_rate", "-of", "json", source],

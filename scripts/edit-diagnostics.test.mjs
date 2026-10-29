@@ -39,3 +39,16 @@ test('generic failure exports cannot quote private requested captions or reviewe
   assert.equal(report.failure.code, 'EDIT_FAILED');
   assert.match(report.failure.message, /local app/);
 });
+
+test('source bounds and speed conflicts retain their timing classification when downloaded', () => {
+  for (const code of ['SOURCE_INTERVAL_EXCEEDS_MEDIA', 'CLIP_SPEED_CONFLICT']) {
+    const error = Object.assign(new Error('Timeline timing is inconsistent'), { diagnostic: { version: 1,
+      stage: 'clip_extraction', code, details: { timing: { declaredSpeed: 1, serializedTargetRange: { duration: 15866666 } },
+        bounds: { availableSeconds: 10.471667, deficitSeconds: 5.394999 }, mapping: { document: 'draft_info.json', scope: 'active' } } } });
+    const report = buildJobDiagnosticReport({ id: 'timing', status: 'failed', diagnostic: captureFailureDiagnostic(error) });
+    assert.equal(report.failure.code, code);
+    assert.equal(report.failure.details.timing.serializedTargetRange.duration, 15866666);
+    assert.equal(report.failure.details.bounds.availableSeconds, 10.471667);
+    assert.equal(report.failure.details.mapping.document, 'draft_info.json');
+  }
+});
