@@ -22,6 +22,12 @@ The original Mac cancellation failure remains unconfirmed: the reporter's 20 rer
 
 The test now consumes an explicit `READY <pid>` marker and ignores unrelated diagnostics. Production cancellation and process-group termination are unchanged. A POSIX descendant-process regression was added for Mac/Linux runs, alongside the Windows tree-cancellation test. The POSIX test is explicitly skipped on Windows.
 
+## Returned Mac test results
+
+The supplied `mac-test-results.log` reports 133 tests: 130 passed, one failed and two skipped. The original compact-inventory, active cancellation, POSIX descendant cancellation and resource-packaging tests all passed. The skips are the Windows-only process-tree test and the optional official-builder integration dependency check. The log contains a test run; it does not include lint, build or native CapCut acceptance results.
+
+The remaining failure is in the new large-output fixture: synchronous writes to Node's nonblocking macOS stdout pipe can return `EAGAIN` after a partial write. The fixture now emits bounded chunks and retries `EAGAIN`/`EWOULDBLOCK` for up to five seconds, preserving the exact offset. Other write errors still fail. An additional regression injects backpressure after a partial write and checks that the entire large contract reaches the real inventory reader. Production discovery and editing behavior are unchanged by this fixture repair.
+
 ## Mac rerun
 
 Use an updated checkout containing these changes and the existing pinned setup. From the repository root:

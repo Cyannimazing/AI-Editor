@@ -8,9 +8,10 @@
 ## Current work
 
 - 2026-10-29: addressed the supplied Mac report with compact CLI inventory and bounded contract diagnostics, canonical job-boundary packaging checks, and readiness-based cancellation tests.
-- Windows checks: 132 tests passed, one POSIX-only skip; lint/build passed; cancellation file passed 20 additional runs. Actual Mac rerun of these changes is pending.
+- Returned Mac log: 130 passes, one large-output fixture failure, two skips. The original inventory, cancellation/POSIX descendants and resource packaging tests passed. No Mac lint/build/native CapCut result was included.
+- Fixed the fixture's EAGAIN handling with bounded partial-write retries and a reproducing regression. Fresh Windows checks: 133 tests passed, one POSIX-only skip; lint/build passed.
 - Follow-up and Mac commands: docs/macos-compatibility-fixes-2026-10-29.md. Local server remains stopped.
 
 ## Next step
 
-- After distribution, obtain the friend's Mac test output and perform a disposable native CapCut trial before real-project acceptance.
+- After distributing the fixture repair, obtain its Mac rerun plus lint/build results, then perform a disposable native CapCut trial before real-project acceptance.

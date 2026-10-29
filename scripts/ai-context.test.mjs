@@ -71,14 +71,28 @@ async function inventoryWithOutput(t, mode) {
 if (process.argv[1]?.replaceAll('\\\\', '/').endsWith('/capcut-cli/dist/index.js') && process.argv.includes('describe')) {
   process.stdout.write = value => {
     const data = JSON.parse(value);
-    if (${JSON.stringify(mode)} === 'large') data.commands[0].summary = 'complete-contract-'.repeat(5000);
+    if (${JSON.stringify(mode)}.startsWith('large')) data.commands[0].summary = 'complete-contract-'.repeat(5000);
     let output = JSON.stringify(data);
     if (${JSON.stringify(mode)} === 'invalid' || (${JSON.stringify(mode)} === 'pipe-exit' && !process.argv.includes('--compact'))) {
       if (output.length < 65536) output = JSON.stringify({ ...data, padding: 'x'.repeat(70000) });
       output = Buffer.from(output).subarray(0, 65536);
     }
-    const bytes = Buffer.from(output); let offset = 0;
-    while (offset < bytes.length) offset += writeSync(1, bytes, offset, bytes.length - offset);
+    const bytes = Buffer.from(output); let offset = 0, injectedBackpressure = false;
+    // Node's Unix stdout pipe can be nonblocking even with writeSync. Keep the
+    // fixture synchronous for the CLI's immediate exit, but bound backpressure.
+    const deadline = Date.now() + 5000, waitBuffer = new Int32Array(new SharedArrayBuffer(4));
+    while (offset < bytes.length) {
+      try {
+        if (${JSON.stringify(mode)} === 'large-backpressure' && offset > 0 && !injectedBackpressure) {
+          injectedBackpressure = true;
+          throw Object.assign(new Error('Injected pipe backpressure'), { code: 'EAGAIN' });
+        }
+        offset += writeSync(1, bytes, offset, Math.min(16384, bytes.length - offset));
+      } catch (error) {
+        if (!['EAGAIN', 'EWOULDBLOCK'].includes(error.code) || Date.now() >= deadline) throw error;
+        Atomics.wait(waitBuffer, 0, 0, 1);
+      }
+    }
     return true;
   };
 }
@@ -98,6 +112,13 @@ test('inventory uses the complete compact index when a full CLI contract would b
 
 test('inventory accepts a complete contract larger than 64 KiB', async t => {
   const { stdout } = await inventoryWithOutput(t, 'large');
+  const inventory = JSON.parse(stdout);
+  assert.equal(inventory.capcut.commands.commands[0].summary.length, 90000);
+  assert.ok(inventory.capcut.commands.commands.some(command => command.name === 'add-effect'));
+});
+
+test('large contract fixture survives pipe backpressure after a partial write', async t => {
+  const { stdout } = await inventoryWithOutput(t, 'large-backpressure');
   const inventory = JSON.parse(stdout);
   assert.equal(inventory.capcut.commands.commands[0].summary.length, 90000);
   assert.ok(inventory.capcut.commands.commands.some(command => command.name === 'add-effect'));

@@ -1,5 +1,13 @@
 # Technical audit addendum — 2026-10-27
 
+## 2026-10-29 — Returned Mac log and large-output fixture repair
+
+The supplied `mac-test-results.log` reports 130 passes, one failure and two skips out of 133 tests. Compact inventory discovery, active cancellation, POSIX descendant cancellation, native effect metadata/package copying and canonical-alias/internal-link resource checks all passed on that Mac. The Windows-only cancellation test and optional official-builder dependency check were skipped. The log does not contain lint, build or native CapCut acceptance results.
+
+The remaining failure is the large-contract test fixture's `writeSync()` loop: Node's nonblocking Unix stdout pipe can return `EAGAIN` after a partial write. The fixture now writes bounded chunks and retries only `EAGAIN`/`EWOULDBLOCK` with its offset preserved and a five-second retry deadline. A fault-injection regression reproduced the failure before the repair and then passed. Production inventory, editing and security gates are unchanged.
+
+Fresh Windows verification: 134 tests discovered, 133 passed and one expected POSIX-only skip; lint and the production build including TypeScript passed. Evidence is retained under `.local-tools/preview-probe/mac-eagain-*`. The existing Node module-type and broad build-tracing warnings remain. The repaired fixture still needs a Mac rerun; actual native CapCut acceptance is a separate step.
+
 ## 2026-10-29 — Mac report: inventory, packaging and cancellation tests
 
 The supplied Mac compatibility report reproduced truncated CapCut discovery output and rejection of the system `/var` temporary-folder alias. Startup now uses the CLI's supported compact discovery index (all 88 commands), with full contracts still queried on demand for all six capability topics. Shared contract parsing rejects malformed/incomplete JSON with bounded producer/byte-count diagnostics. Resource packaging checks the original path components up to the canonical job-store boundary, accepting aliases above the store while rejecting linked generated resources, internal parents, links back to the store root, parent traversal and bundle dependencies.
