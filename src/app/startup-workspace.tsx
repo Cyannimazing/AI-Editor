@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import KeyframeHelper from "./keyframe-helper";
 import OnlineFeatures from "./online-features";
+import NativePermissionCheck from "./native-permission-check";
 
 type Setup = {
   stage: string; progress: number; detail: string; error: string | null;
@@ -111,6 +112,7 @@ export default function StartupWorkspace() {
           {['error', 'idle'].includes(setup.stage) && <button className="min-h-11 rounded-xl border border-white/20 px-4 text-sm hover:bg-white/5 disabled:opacity-50" disabled={busy} onClick={() => void retrySetup()}>{busy ? "Resuming setup…" : "Resume tool setup"}</button>}
         </div>}
       </section>
+      {setup?.platform === "darwin" && <NativePermissionCheck />}
       {setup?.account.signedIn && <OnlineFeatures installed={Boolean(setup?.plugin.installed)} />}
       {setup?.account.signedIn && <p className="mt-5 text-sm leading-6 text-amber-100">{setup.nativeReview.reason}</p>}
       {setup?.account.signedIn && !setup.isolation.available && <p className="mt-4 text-sm leading-6 text-amber-100">{setup.isolation.reason}</p>}

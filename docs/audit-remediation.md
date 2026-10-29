@@ -1,5 +1,15 @@
 # Technical audit addendum — 2026-10-27
 
+## 2026-10-30 — JXA Screen Recording preflight compatibility
+
+The latest Mac audit confirms Accessibility now passes, followed by `CGPreflightScreenCaptureAccess is not a function` before Screen Recording can be checked. Reproduced the missing-symbol failure in the actual driver under a simulated JXA bridge. Following Apple's documented C-function binding mechanism, the driver now explicitly binds the missing CoreGraphics symbol with its `bool(void)` signature. Unsupported binding/call results have a distinct compatibility diagnostic; denied permissions and missing evidence still block native review.
+
+Added **Setup and connections → Check Mac permissions**, a protected status-only endpoint, downloadable safe report and `pnpm check:native`. They query the same driver used by editing without accessing windows, launching CapCut, capturing pixels, exporting, uploading or consuming Codex usage. The setup doctor uses this service too. The status reports compatibility separately from Accessibility/Screen Recording; Automation and native player verification remain separate job checks. The report does not include arbitrary OS stderr or personal paths.
+
+Fresh Windows verification: **167 tests discovered, 165 passed, two expected platform skips; lint and the production/TypeScript build passed.** The added actual-macOS JXA smoke test is one of those skips; on a Mac it calls the real preflight bridge without needing a project or prior permission grant. Read-only code review found no actionable issues. A production HTTP trial verified 401 without a session, 403 for a cross-origin request, and a no-store platform-appropriate response for authorized requests. A headless browser trial with synthetic Mac responses checked allowed, denied and compatibility-failure states, no automatic check, no stale success and report download. This UI trial does not claim actual Mac execution.
+
+Evidence: `.local-tools/preview-probe/preflight-bridge-{tests,lint,build}.log`, `preflight-bridge-http.json` and `preflight-ui/receipt.json`. No CapCut project or original was operated. Follow the [standalone Mac test steps](macos-native-review-2026-10-30.md#test-this-before-another-edit) before repeating the zoom trial.
+
 ## 2026-10-30 — Returned Mac native-review audit
 
 The returned audit confirms a constructed 10.471667s candidate with editable 100%–130% scale curves and passing structural checks. Native review failed before window inspection because Accessibility trust was missing. Reproduced the app's reporting defect with the actual nested `osascript` error shape: its actionable message became a generic tool failure. Specific permission categories now survive that wrapper and propagate through blocked job results into the UI/downloaded diagnostics. The driver receipt retains failed stage, candidate revision, sample count and a shareable relative receipt identifier; incomplete evidence still cannot enable approval.

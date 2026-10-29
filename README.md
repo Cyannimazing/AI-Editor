@@ -71,7 +71,9 @@ Grant permissions to the app that **starts AI-Editor**, such as Terminal, your I
 
 Use the add button if the launcher is not listed in Accessibility or Screen Recording. Restart the launcher if macOS requests it. Keep the desktop unlocked and CapCut visible and in English during inspection. Full Disk Access and disabling Gatekeeper are not required. See [Apple's recording permissions guide](https://support.apple.com/guide/mac-help/control-access-screen-system-audio-recording-mchld6aa7d23/mac) and [Automation guide](https://support.apple.com/en-nz/guide/mac-help/mchl108e1718/mac).
 
-After setup, run `pnpm check:setup` to check prerequisites without editing a project. On Mac, `pnpm check:setup --permissions` also checks Accessibility and Screen Recording. Resolve reported items, then resume setup in the app. On a memory-constrained MacBook, begin with a short clip and close other heavy applications.
+Before the first Mac edit, open **Setup and connections → Check Mac permissions**. This checks the native API, Accessibility and Screen Recording without opening CapCut, taking screenshots or using AI. **Compatibility check: Passed** means the API ran; both permission rows must also say **Allowed** before the edit. If it fails, use **Download check report** and share that file. Automation and the actual CapCut player are checked during the edit.
+
+For terminal diagnostics, `pnpm check:native` runs that same standalone check and returns a shareable JSON report. `pnpm check:setup` checks all prerequisites; `pnpm check:setup --permissions` includes the Mac permission check. Resolve reported items, then resume setup in the app. On a memory-constrained MacBook, begin with a short clip and close other heavy applications.
 
 ### Common setup problems
 

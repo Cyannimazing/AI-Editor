@@ -39,10 +39,30 @@ The exact visible-open behavior of CapCut 9.5 on this Mac remains to be observed
 
 The audit's `media-outside-draft` warning refers to the private candidate before publication. The current publisher already copies job-owned uploaded media/effect resources into the review project's `assets/ai-editor`, registers and links media IDs, then compares resource bytes and authored controls before opening. That warning alone does not establish a missing-media defect in a published copy. External original dependencies remain external by design. A CapCut relink/access prompt, if one appears, should be captured in the next test report.
 
+## Follow-up: Screen Recording API bridge failure
+
+The latest returned audit confirms Accessibility is allowed, but `CGPreflightScreenCaptureAccess` was undefined in JXA. That exception occurred before Screen Recording permission could be determined. Error `-2700` alone is not evidence of missing permission.
+
+JXA exposes imported C functions using framework BridgeSupport metadata. Apple documents `ObjC.bindFunction` for linked C symbols missing from that metadata. The driver now explicitly binds `CGPreflightScreenCaptureAccess` as `['bool', []]` when needed, following its C `bool` return type and empty parameter list. The permission check stays in the same `osascript` process as native inspection. An unavailable binding or invalid result produces `NATIVE_MACOS_PREFLIGHT_UNSUPPORTED`; a valid `false` still requires Screen Recording permission. Neither can pass native verification.
+
+Primary references: [Apple JXA release notes — C Functions and Types](https://developer.apple.com/library/archive/releasenotes/InterapplicationCommunication/RN-JavaScriptForAutomation/Articles/OSX10-10.html), [CoreGraphics preflight declaration](https://developer.apple.com/documentation/coregraphics/cgpreflightscreencaptureaccess()?language=objc).
+
+### Test this before another edit
+
+1. Pull the latest code and restart AI-Editor from the same authorized launcher.
+2. Open **Setup and connections → Check Mac permissions**. No project or footage is needed. It does not open CapCut, request access, capture pixels, export, upload or use Codex.
+3. Check **Compatibility check: Passed**, **Accessibility: Allowed** and **Screen Recording: Allowed**. Compatibility passing with a denied permission means the bridge works, but that permission still needs enabling in macOS settings. Restart the launcher after granting permission and rerun the check.
+4. If the check fails, click **Download check report**. Share that report; no job ID, draft inspection or FFprobe command is needed. Raw OS errors stay in local `.local-tools/native-preflight/check-*/failure.local.json`; the downloadable report excludes private paths and arbitrary stderr.
+5. Once both permissions pass, repeat the disposable 100%–130% zoom test. Automation, opening the intended project, player capture and native keyframe appearance are separate checks performed during that edit.
+
+For CLI use, `pnpm check:native` runs the same service. Its Node script exits with 0 for both permissions allowed, 1 for denied/failed, and 2 for a non-Mac host (pnpm may normalize a nonzero script exit). `pnpm test` now includes an actual Mac-only `osascript` smoke test which accepts either permission boolean but fails if the API cannot be called. This tests runtime compatibility even before permission is granted and never accesses a CapCut project.
+
 ## Validation and next Mac test
 
 Regression coverage exercises nested permission errors, privacy-safe diagnostics, missing preflight permissions before window access, a launch process that spawns successfully then exits with an error, and every failed publication stage. Existing native-evidence tests reject empty, incomplete or altered captures. These are automated checks; they do not stand in for a Mac CapCut playback trial.
 
 Windows checks after the repair: **161 tests passed, one expected POSIX-only skip; lint and the production/TypeScript build passed.** A nested-process regression also verifies that the launch exit code survives its Node wrapper. Static review findings about that code and stale retry diagnostics were corrected before handoff.
 
-Update the source, restart from the authorized launcher, repeat the same disposable 100%–130% zoom and check whether native review gets beyond preflight. If anything else fails, send the app's downloaded diagnostics and the visible CapCut screen. No new effects, reusability feature or export workflow is needed for this test.
+The subsequent bridge repair adds regression cases for an absent imported symbol, successful explicit binding, denied access, unavailable/broken binding, malformed return values and a status-only action that cannot access windows or request permission. Run the standalone check above before another full edit. Windows regression tests simulate JXA bridge behavior; the added Mac-only smoke test runs the real bridge on your Mac.
+
+Bridge-repair validation: **165 tests passed, two platform skips on Windows; lint and production/TypeScript build passed.** Authenticated HTTP checks and a headless UI test with simulated Mac results passed, including report download. Actual Mac execution is the next standalone check above.

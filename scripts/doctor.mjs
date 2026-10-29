@@ -1,12 +1,11 @@
 import { existsSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { join } from 'node:path';
 import { findExecutable, codeModeHost, platformPaths } from '../src/server/platform/runtime.mjs';
 import { previewBrowser } from '../src/server/platform/browser.mjs';
 import { toolchainCurrent } from '../src/server/setup/toolchain.mjs';
 import { motionRuntimeReady } from '../src/server/editing/motion-runtime.mjs';
-import { NativeUI } from '../src/server/capcut/native-ui.mjs';
+import { checkNativePreflight } from '../src/server/capcut/native-preflight.mjs';
 const run = promisify(execFile), checks = [];
 const check = (name, ready, detail) => checks.push({ name, ready: Boolean(ready), detail });
 check('Platform', ['win32', 'darwin'].includes(process.platform), `${process.platform}/${process.arch}`);
@@ -32,8 +31,8 @@ try {
 } catch { check('ChatGPT sign-in', false, 'Sign in with ChatGPT from AI-Editor'); }
 if (process.argv.includes('--permissions') && process.platform === 'darwin') {
   try {
-    await new NativeUI(join(process.cwd(), '.local-tools', 'doctor-permissions')).perform('preflight');
-    check('Desktop permissions', true, 'Accessibility and Screen Recording allowed; Automation is checked when controlling CapCut');
+    const report = await checkNativePreflight();
+    check('Desktop permissions', report.ok, report.message);
   } catch (error) { check('Desktop permissions', false, error.message); }
 }
 console.log(JSON.stringify({ readyForTest: checks.every(c => c.ready), checks,

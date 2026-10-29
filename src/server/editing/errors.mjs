@@ -6,6 +6,7 @@ function diagnosticText(error) {
 
 const launcherHelp = 'Use the app that starts the AI-Editor server: Terminal/iTerm, or VS Code/Codex when started from its terminal. Confirm the app named by macOS, then fully quit and reopen that launcher and restart AI-Editor.';
 export const nativeFailureMessages = Object.freeze({
+  NATIVE_MACOS_PREFLIGHT_UNSUPPORTED: 'macOS native-review compatibility check failed: AI-Editor could not call the Screen Recording preflight API. This does not establish a permission denial. Update AI-Editor and run Check Mac permissions before another edit; if it persists, share that check\'s report.',
   NATIVE_MACOS_ACCESSIBILITY_REQUIRED: `macOS Accessibility permission is required. In System Settings > Privacy & Security > Accessibility, enable the launching app. ${launcherHelp}`,
   NATIVE_MACOS_SCREEN_RECORDING_REQUIRED: `macOS Screen & System Audio Recording permission is required to inspect CapCut. In System Settings > Privacy & Security, allow screen recording for the launching app. ${launcherHelp}`,
   NATIVE_MACOS_AUTOMATION_REQUIRED: `macOS Automation permission is required. In System Settings > Privacy & Security > Automation, allow the launching app to control System Events and CapCut when requested. ${launcherHelp}`,
@@ -17,6 +18,7 @@ export const nativeFailureMessages = Object.freeze({
 /** Match specific OS findings inside nested execFile/JXA wrappers. -2700 alone is not a permission error. */
 export function nativeFailureCode(error) {
   const { combined } = diagnosticText(error);
+  if (/macOS native preflight compatibility error:|CGPreflightScreenCaptureAccess[^\r\n]*(?:not a function|undefined)/i.test(combined)) return 'NATIVE_MACOS_PREFLIGHT_UNSUPPORTED';
   if (/macOS Accessibility permission is required|osascript is not allowed assistive access/i.test(combined)) return 'NATIVE_MACOS_ACCESSIBILITY_REQUIRED';
   if (/macOS Screen(?: & System Audio)? Recording permission|macOS Screen Recording permission/i.test(combined)) return 'NATIVE_MACOS_SCREEN_RECORDING_REQUIRED';
   if (/Not authori[sz]ed to send Apple events|\(-1743\)|macOS Automation permission is required/i.test(combined)) return 'NATIVE_MACOS_AUTOMATION_REQUIRED';

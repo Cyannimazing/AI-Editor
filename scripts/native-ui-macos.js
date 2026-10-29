@@ -7,6 +7,26 @@ ObjC.import('Vision');
 ObjC.import('ApplicationServices');
 ObjC.import('CoreGraphics');
 
+// JXA imports only symbols listed in framework BridgeSupport metadata. CoreGraphics
+// exports this C function even on systems whose metadata does not expose it.
+// Apple's API signature: extern bool CGPreflightScreenCaptureAccess(void).
+function screenCaptureAccess() {
+  let binding = 'framework';
+  try {
+    if (typeof $.CGPreflightScreenCaptureAccess !== 'function') {
+      if (typeof ObjC.bindFunction !== 'function') throw new Error('JXA function binding is unavailable');
+      ObjC.bindFunction('CGPreflightScreenCaptureAccess', ['bool', []]);
+      binding = 'explicit';
+    }
+    if (typeof $.CGPreflightScreenCaptureAccess !== 'function') throw new Error('CoreGraphics symbol was not bound');
+    const allowed = $.CGPreflightScreenCaptureAccess();
+    if (typeof allowed !== 'boolean') throw new Error('CoreGraphics returned an invalid permission result');
+    return { allowed, binding };
+  } catch (error) {
+    throw new Error('macOS native preflight compatibility error: CGPreflightScreenCaptureAccess could not be called. ' + String(error.message || error).slice(0, 500));
+  }
+}
+
 // Capture and input must refer to the same observed native window, including
 // its screen position. Window capture excludes other applications' pixels.
 function assertStableWindow(expected, current, active) {
@@ -50,9 +70,14 @@ function accessibilityPanels(windows, bounds, scale) {
 function run(argv) { // eslint-disable-line @typescript-eslint/no-unused-vars -- osascript entry point
   const data = $.NSString.stringWithContentsOfFileEncodingError(argv[0], $.NSUTF8StringEncoding, null);
   const request = JSON.parse(ObjC.unwrap(data));
-  if (!$.AXIsProcessTrusted()) throw new Error('macOS Accessibility permission is required for the application that launches AI-Editor. Enable it in System Settings > Privacy & Security > Accessibility, then retry.');
-  if (!$.CGPreflightScreenCaptureAccess()) throw new Error('macOS Screen & System Audio Recording permission is required to inspect the CapCut window. Enable screen recording for the application that launches AI-Editor, then restart it. No microphone permission is needed.');
-  if (request.action === 'preflight') return JSON.stringify({ platform: 'darwin', accessibility: true, screenRecording: true });
+  const accessibility = $.AXIsProcessTrusted();
+  if (!accessibility && request.action !== 'permission-status') throw new Error('macOS Accessibility permission is required for the application that launches AI-Editor. Enable it in System Settings > Privacy & Security > Accessibility, then retry.');
+  const recording = screenCaptureAccess();
+  const permissions = { platform: 'darwin', accessibility, screenRecording: recording.allowed, screenCaptureBinding: recording.binding };
+  // Readiness can be checked without opening CapCut, capturing pixels or sending Apple events.
+  if (request.action === 'permission-status') return JSON.stringify(permissions);
+  if (!recording.allowed) throw new Error('macOS Screen & System Audio Recording permission is required to inspect the CapCut window. Enable screen recording for the application that launches AI-Editor, then restart it. No microphone permission is needed.');
+  if (request.action === 'preflight') return JSON.stringify(permissions);
   const windows = ObjC.deepUnwrap($.CGWindowListCopyWindowInfo($.kCGWindowListOptionOnScreenOnly, $.kCGNullWindowID))
     .filter(w => w.kCGWindowOwnerName === 'CapCut' && w.kCGWindowLayer === 0 && w.kCGWindowBounds.Width >= 200 && w.kCGWindowBounds.Height >= 150);
   if (!windows.length) throw new Error('CapCut has no usable visible window. Keep its project window open.');
