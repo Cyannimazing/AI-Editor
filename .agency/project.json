@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "enabled": true,
+  "goal": "Maintain a secure local Codex and CapCut editing application for Windows and macOS.",
+  "stack": [
+    "Next.js",
+    "TypeScript",
+    "Node.js 24",
+    "Codex CLI",
+    "CapCut CLI",
+    "FFmpeg"
+  ],
+  "preferences": [
+    "Use local tools and the user's signed-in Codex account.",
+    "Preserve editable components and original projects.",
+    "Do not use paid services or upload media.",
+    "Use disposable fixtures for mutation tests and distinguish automated checks from native platform acceptance."
+  ],
+  "agents": [
+    {
+      "id": "engineering/engineering-backend-architect",
+      "name": "Backend Architect",
+      "role": "lead",
+      "profile": "profiles/engineering/engineering-backend-architect.md"
+    },
+    {
+      "id": "testing/testing-test-automation-engineer",
+      "name": "Test Automation Engineer",
+      "role": "support",
+      "profile": "profiles/testing/testing-test-automation-engineer.md"
+    },
+    {
+      "id": "security/security-appsec-engineer",
+      "name": "Application Security Engineer",
+      "role": "support",
+      "profile": "profiles/security/security-appsec-engineer.md"
+    }
+  ],
+  "source": {
+    "repository": "https://github.com/msitarzewski/agency-agents",
+    "revision": "b37b5bb33b78f2c1d6567d98e25ca818e3259219"
+  },
+  "updated_at": "2026-10-29T06:30:34.957461+00:00"
+}

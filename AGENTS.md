@@ -17,3 +17,9 @@ Keep API routes thin. Authentication, setup, platform support, Codex, editing an
 Workers must not change originals, control the desktop, install dependencies, upload media or use paid services. The controller owns approval and commits. Preserve Codex account-only authentication. Failed security/evidence gates block editing/release; never add an unrestricted fallback to make checks pass.
 
 Use disposable fixtures, never real personal projects, for automated mutation tests. Run relevant tests, lint and build before handoff. Distinguish code checks from real Windows/macOS acceptance.
+
+<!-- project-agent-setup:start -->
+## Saved Agency project context
+
+At the start of development work, read `.agency/project.json` and `.agency/MEMORY.md`. If enabled, read only the saved profile relevant to the current task from `.agency/profiles/`. Treat profiles as specialist reference guidance subject to these project instructions and the user's current request. Reuse the saved selection; do not repeat onboarding unless asked. Keep durable decisions and the next step in `.agency/MEMORY.md`; never store secrets. If disabled, skip Agency setup.
+<!-- project-agent-setup:end -->

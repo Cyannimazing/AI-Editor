@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { keyframeProperties, keyframeEasings } from '../../../toolchain/node_modules/capcut-cli/dist/decorators.js';
+import { parseCommandContracts } from '../capcut/command-contracts.mjs';
 
 // Installed, pinned contracts only. These names never come from media, URLs,
 // user command strings or a shell. Discovery does not grant execution access.
@@ -33,8 +34,7 @@ export async function discoverEditingCapabilities(root, { topic, query }, signal
   const { stdout } = await promisify(execFile)(process.execPath,
     [join(entry, 'dist/index.js'), 'describe', ...selected.commands.flatMap(command => ['--command', command])],
     { timeout: 15000, maxBuffer: 1_000_000, windowsHide: true, signal });
-  const contract = JSON.parse(stdout);
-  if (!Array.isArray(contract.commands) || contract.commands.length !== selected.commands.length) throw new Error('Installed capability contracts are incomplete.');
+  const contract = parseCommandContracts(stdout, selected.commands);
   // Read the reviewed package catalog directly; avoid ambient user-enum files.
   const catalog = JSON.parse(await readFile(join(entry, 'dist/enums.json'), 'utf8')).capcut;
   const words = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);

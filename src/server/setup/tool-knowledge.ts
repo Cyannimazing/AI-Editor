@@ -15,6 +15,7 @@ export async function toolKnowledge(refresh = false): Promise<Knowledge> {
   const manifests = await Promise.all([
     readFile(join(root, "toolchain", "pnpm-lock.yaml")), readFile(join(root, "toolchain", "package.json")),
     readFile(join(root, "scripts", "inspect-editing-tools.mjs")), readFile(join(root, "ai", "context-index.json")),
+    readFile(join(root, "src", "server", "capcut", "command-contracts.mjs")),
   ]);
   const fingerprint = createHash("sha256").update(Buffer.concat(manifests)).digest("hex");
   if (!refresh && store.__editorToolKnowledge?.fingerprint === fingerprint) return store.__editorToolKnowledge.value;

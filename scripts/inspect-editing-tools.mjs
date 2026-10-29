@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { findExecutable } from '../src/server/platform/runtime.mjs';
 import { localEffectBuilder } from '../src/server/capcut/local-builder.mjs';
 import { motionRuntimeReady } from '../src/server/editing/motion-runtime.mjs';
+import { parseCommandContracts } from '../src/server/capcut/command-contracts.mjs';
 
 const run = promisify(execFile), root = process.cwd(), modules = join(root, 'toolchain', 'node_modules');
 async function packageInfo(name) {
@@ -25,7 +26,10 @@ async function probe(name, args) {
 }
 const cli = join(modules, 'capcut-cli', 'dist', 'index.js');
 const [{ stdout: described }, ffmpeg, ffprobe, codex, ...packages] = await Promise.all([
-  run(process.execPath, [cli, 'describe'], { timeout: 15000, windowsHide: true, maxBuffer: 2_000_000 }),
+  // The pinned CLI exits immediately after writing. Its full >64 KiB contract
+  // can be cut off by Unix pipes; the supported compact index lists every
+  // command. Detailed contracts are fetched on demand by capability discovery.
+  run(process.execPath, [cli, 'describe', '--compact'], { timeout: 15000, windowsHide: true, maxBuffer: 2_000_000 }),
   probe('ffmpeg', ['-hide_banner', '-filters']), probe('ffprobe', ['-version']), probe('codex', ['--version']),
   ...['capcut-cli', 'hyperframes', 'gsap', 'fontkit', '@remotion/cli', 'remotion', '@modelcontextprotocol/sdk'].map(packageInfo),
 ]);
@@ -33,7 +37,7 @@ const { keyframeProperties, keyframeEasings, bubbleCatalogue } = await import('.
 const { mixModeSlugs, filterCatalogue } = await import('../toolchain/node_modules/capcut-cli/dist/factory.js');
 const enumBytes = await readFile(join(modules, 'capcut-cli', 'dist', 'enums.json'));
 const enums = JSON.parse(enumBytes).capcut;
-const commands = JSON.parse(described);
+const commands = parseCommandContracts(described);
 const filters = ffmpeg.verified ? ffmpeg.output.split(/\r?\n/).flatMap(line => /^\s*[TSC.]{2,3}\s+(\S+)\s+[AVN|]+->[AVN|]+\s+/.exec(line)?.slice(1, 2) || []) : [];
 const docs = {};
 for (const path of ['capcut-cli/docs/command-reference.md', 'capcut-cli/dist/compile.js', 'capcut-cli/dist/decorators.js', 'hyperframes/README.md']) {

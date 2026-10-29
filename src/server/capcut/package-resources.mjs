@@ -15,12 +15,15 @@ export async function packageJobResources(draft, destination, jobStore) {
       if (typeof material.path !== 'string' || !isAbsolute(material.path)) continue;
       const source = await realpath(material.path), offset = relative(root, source);
       if (offset === '..' || offset.startsWith(`..${sep}`) || isAbsolute(offset)) continue;
+      if (material.path.split(/[\\/]/).includes('..')) throw new Error('Generated resource paths cannot contain parent traversal.');
       if ((await lstat(material.path)).isSymbolicLink()) throw new Error('Generated resources cannot be linked.');
-      // Walk every component too: a realpath check alone does not reject an
-      // internal symlink that happens to resolve back into the job store.
+      // Inspect the original components, but stop at the canonical job boundary.
+      // macOS /var -> /private/var aliases above that boundary are legitimate.
+      // Walking only `source` would hide internal links that resolve in-store.
       let parent = material.path;
-      while (parent !== root && relative(root, parent) !== '') {
+      while (true) {
         if ((await lstat(parent)).isSymbolicLink()) throw new Error('Generated resource parents cannot be linked.');
+        if (relative(root, await realpath(parent)) === '') break;
         const next = dirname(parent); if (next === parent) throw new Error('Invalid generated resource path.'); parent = next;
       }
       let target = copied.get(source);

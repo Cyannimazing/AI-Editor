@@ -4,7 +4,7 @@ import { materialSearchArguments, materialSearchTool, materialSearchItems, capcu
 import { inspectEffectResource, effectBundleFiles, selectOfficialEffect, effectCacheRoot } from '../src/server/capcut/effect-resources.mjs';
 import { integrationCapabilities, effectRoutingReceipt } from '../src/server/capcut/integration-policy.mjs';
 import { packageJobResources } from '../src/server/capcut/package-resources.mjs';
-import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, realpath, symlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -103,6 +103,44 @@ test('native metadata supplies real control names and packages the complete loca
   metadata.setting.effect_adjust_params[0].default = 2;
   await writeFile(join(folder, 'extra.json'), JSON.stringify(metadata));
   assert.throws(() => inspectEffectResource(catalogEffect, officialEffect, cache), /control/);
+});
+
+test('resource packaging accepts ancestor aliases above the job store with either path spelling', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'resource-alias-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const physical = join(root, 'physical'), alias = join(root, 'alias');
+  await mkdir(join(physical, 'store', 'effect', 'shader'), { recursive: true });
+  await writeFile(join(physical, 'store', 'effect', 'shader', 'main.frag'), 'shader payload');
+  await symlink(physical, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const aliasedStore = join(alias, 'store'), canonicalStore = join(physical, 'store');
+  for (const [index, [store, source]] of [
+    [aliasedStore, join(aliasedStore, 'effect')],
+    [canonicalStore, join(aliasedStore, 'effect')],
+    [aliasedStore, join(canonicalStore, 'effect')],
+  ].entries()) {
+    const destination = join(root, `review-${index}`); await mkdir(destination);
+    const draft = { materials: { video_effects: [{ path: source }] } };
+    assert.equal(await packageJobResources(draft, destination, store), 1);
+    assert.equal(await readFile(join(draft.materials.video_effects[0].path, 'shader', 'main.frag'), 'utf8'), 'shader payload');
+  }
+});
+
+test('resource packaging rejects linked resources, in-store parents and bundle dependencies', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'resource-links-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = join(root, 'store'), effect = join(store, 'effect'), destination = join(root, 'review');
+  await mkdir(effect, { recursive: true }); await mkdir(destination);
+  await writeFile(join(effect, 'payload.dat'), 'effect data');
+  const alias = join(store, 'alias'); await symlink(effect, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  const packagePath = path => packageJobResources({ materials: { video_effects: [{ path }] } }, destination, store);
+  await assert.rejects(packagePath(alias), /cannot be linked/);
+  await assert.rejects(packagePath(join(alias, 'payload.dat')), /parents cannot be linked/);
+  const loop = join(store, 'loop'); await symlink(store, loop, process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(packagePath(join(loop, 'effect', 'payload.dat')), /parents cannot be linked/);
+  await assert.rejects(packagePath(`${alias}/../effect/payload.dat`), /traversal|linked/);
+  const bundle = join(store, 'bundle'); await mkdir(bundle);
+  await symlink(effect, join(bundle, 'dependency'), process.platform === 'win32' ? 'junction' : 'dir');
+  await assert.rejects(packagePath(bundle), /Linked native resource files/);
 });
 
 test('installed official builder applies the authoritative URI and named controls locally', async t => {

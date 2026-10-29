@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { loadRoleInstructions } from '../src/server/codex/context.mjs';
 import { referenceEvidenceContext } from '../src/server/editing/reference-context.mjs';
 
@@ -57,4 +58,55 @@ test('offline inventory discovers actual command contracts and native keyframe p
   if (inventory.ffmpeg.verified) assert.ok(inventory.ffmpeg.filters.includes('overlay'));
   assert.equal(inventory.applicationAdapter.planVersion, 5);
   assert.ok(inventory.applicationAdapter.gaps.length > 0);
+});
+
+// Model the observed Unix pipe/early-exit boundary without depending on the
+// host pipe capacity. All commands still use the real pinned CLI and inventory.
+async function inventoryWithOutput(t, mode) {
+  const base = join(process.cwd(), '.local-tools', 'context-tests'); await mkdir(base, { recursive: true });
+  const folder = await mkdtemp(join(base, 'stdout-'));
+  t.after(() => rm(folder, { recursive: true, force: true }));
+  const preload = join(folder, 'output.mjs');
+  await writeFile(preload, `import { writeSync } from 'node:fs';
+if (process.argv[1]?.replaceAll('\\\\', '/').endsWith('/capcut-cli/dist/index.js') && process.argv.includes('describe')) {
+  process.stdout.write = value => {
+    const data = JSON.parse(value);
+    if (${JSON.stringify(mode)} === 'large') data.commands[0].summary = 'complete-contract-'.repeat(5000);
+    let output = JSON.stringify(data);
+    if (${JSON.stringify(mode)} === 'invalid' || (${JSON.stringify(mode)} === 'pipe-exit' && !process.argv.includes('--compact'))) {
+      if (output.length < 65536) output = JSON.stringify({ ...data, padding: 'x'.repeat(70000) });
+      output = Buffer.from(output).subarray(0, 65536);
+    }
+    const bytes = Buffer.from(output); let offset = 0;
+    while (offset < bytes.length) offset += writeSync(1, bytes, offset, bytes.length - offset);
+    return true;
+  };
+}
+`);
+  return promisify(execFile)(process.execPath, ['scripts/inspect-editing-tools.mjs'], {
+    cwd: process.cwd(), timeout: 30000, windowsHide: true, maxBuffer: 2_000_000,
+    env: { ...process.env, NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --import=${pathToFileURL(preload).href}` },
+  });
+}
+
+test('inventory uses the complete compact index when a full CLI contract would be truncated at exit', async t => {
+  const { stdout } = await inventoryWithOutput(t, 'pipe-exit');
+  const inventory = JSON.parse(stdout);
+  assert.ok(inventory.capcut.commands.commands.some(command => command.name === 'bubble-text'));
+  assert.ok(inventory.capcut.commands.commands.some(command => command.name === 'add-effect'));
+});
+
+test('inventory accepts a complete contract larger than 64 KiB', async t => {
+  const { stdout } = await inventoryWithOutput(t, 'large');
+  const inventory = JSON.parse(stdout);
+  assert.equal(inventory.capcut.commands.commands[0].summary.length, 90000);
+  assert.ok(inventory.capcut.commands.commands.some(command => command.name === 'add-effect'));
+});
+
+test('inventory rejects truncated contracts with a producer and byte count diagnostic', async t => {
+  await assert.rejects(inventoryWithOutput(t, 'invalid'), error => {
+    assert.match(error.stderr, /CapCut describe.*65536 bytes.*invalid or incomplete JSON/);
+    assert.ok(error.stderr.length < 5000, 'Do not dump the command payload into diagnostics.');
+    return true;
+  });
 });

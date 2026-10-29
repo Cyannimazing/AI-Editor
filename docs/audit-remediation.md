@@ -1,5 +1,13 @@
 # Technical audit addendum — 2026-10-27
 
+## 2026-10-29 — Mac report: inventory, packaging and cancellation tests
+
+The supplied Mac compatibility report reproduced truncated CapCut discovery output and rejection of the system `/var` temporary-folder alias. Startup now uses the CLI's supported compact discovery index (all 88 commands), with full contracts still queried on demand for all six capability topics. Shared contract parsing rejects malformed/incomplete JSON with bounded producer/byte-count diagnostics. Resource packaging checks the original path components up to the canonical job-store boundary, accepting aliases above the store while rejecting linked generated resources, internal parents, links back to the store root, parent traversal and bundle dependencies.
+
+The report's cancellation failure did not reproduce in its 20 Mac reruns. A disposable fixture here reproduced the same PID assertion when a non-PID diagnostic overwrote the test's PID. Cancellation tests now consume explicit readiness markers. Production process termination is unchanged; a POSIX descendant-process regression complements the Windows process-tree check.
+
+Validation on Windows: 133 tests discovered, 132 passed, one expected POSIX-only skip; lint and the production build including TypeScript passed. Twenty additional cancellation-file runs passed, each with four passes and the POSIX-only skip. The real compact inventory and all six detailed discovery topics were checked using pinned CapCut CLI 0.31.1. Regression evidence is retained under `.local-tools/preview-probe/mac-report-*` and `mac-path-traversal-red.log`. The build retains existing broad filesystem-tracing warnings; Node reports the existing module-type warning during direct TypeScript test execution. No dependency changes, app launch, desktop control or original-project mutation were needed. These results are Windows code checks; the new patch still needs the reporter's Mac rerun. See [the compatibility follow-up](macos-compatibility-fixes-2026-10-29.md) for the Mac commands.
+
 ## 2026-10-28 — App integration trial and truthful acceptance reporting
 
 Authenticated `/api/plugin` font discovery returned HTTP 200 with five official results and preserved material descriptions. Disposable app job `4be88bfc-96ef-47a5-aab4-3f003df223dd` built editable linear scale keyframes and separate native text in one build. Approximate preview and independent reviews found no defects, but native output remained unverified. The app's `open-test-copy` action returned HTTP 200 and CapCut displayed the generated video and separate text track with centered text. No original was committed.
