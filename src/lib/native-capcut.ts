@@ -12,6 +12,7 @@ import { promisify } from "node:util";
 import { listProjects, readProjectDraft, resolveTimelineClip } from "./keyframe-helper";
 import { referenceFrames } from "./reference-media";
 import { pictureFramingPolicy, preparePictureMedia } from "../server/editing/picture-framing.mjs";
+import { extractTimelineClip } from '../server/editing/clip-extraction.mjs';
 import { capcutSession, commitNativeCandidate, readNativeDraft, runReferenceEditLoop } from "./reference-edit-loop";
 import { resolveEditSelection, runScopedBuilds } from '../server/editing/project-scope.mjs';
 import { planProjectEdit } from '../server/editing/project-planner';
@@ -209,23 +210,8 @@ async function buildNativeClip(input: ApplyInput, context: ProjectContext) {
     let source = join(job, selected ? "raw.mp4" : `raw${extname(input.rawVideo!.name).toLowerCase()}`);
     if (selected) {
       input.onLog?.(`Preparing only ${selected.material.material_name || "the selected clip"} at ${(selected.segment.target_timerange.start / 1_000_000).toFixed(2)}s on the timeline.`);
-      const targetSeconds = selected.segment.target_timerange.duration / 1_000_000;
-      const sourceSeconds = (selected.segment.source_timerange?.duration ?? selected.segment.target_timerange.duration) / 1_000_000;
-      const speed = sourceSeconds / targetSeconds;
-      if (!Number.isFinite(speed) || speed <= 0 || !Number.isFinite(targetSeconds) || targetSeconds < 0.1) throw new Error("The selected clip has invalid timing.");
-      const { stdout: sourceProbe } = await run(ffprobe(), ["-v", "error", "-show_entries", "stream=codec_type", "-of", "json", selected.mediaPath], { timeout: 15000, signal: input.signal });
-      const hasAudio = (JSON.parse(sourceProbe) as { streams?: { codec_type: string }[] }).streams?.some((stream) => stream.codec_type === "audio");
-      const audioFilters: string[] = selected.segment.reverse ? ["areverse"] : [];
-      let tempo = speed;
-      while (tempo < 0.5) { audioFilters.push("atempo=0.5"); tempo /= 0.5; }
-      while (tempo > 2) { audioFilters.push("atempo=2"); tempo /= 2; }
-      audioFilters.push(`atempo=${tempo}`);
-      await run(ffmpeg(), ["-hide_banner", "-loglevel", "error", "-y", "-ss", String((selected.segment.source_timerange?.start ?? 0) / 1_000_000),
-        "-t", String(sourceSeconds), "-i", selected.mediaPath, "-map", "0:v:0", "-map", "0:a?",
-        "-vf", `${selected.segment.reverse ? "reverse," : ""}setpts=(PTS-STARTPTS)/${speed}`,
-        ...(hasAudio ? ["-af", audioFilters.join(",")] : []), "-t", String(targetSeconds),
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "16", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", source],
-      { timeout: 180_000, maxBuffer: 2_000_000, signal: input.signal });
+      await extractTimelineClip({ source: selected.mediaPath, output: source, job, segment: selected.segment,
+        fps: selected.draft.fps ?? 30, signal: input.signal, onLog: input.onLog });
     } else await writeFile(source, Buffer.from(await input.rawVideo!.arrayBuffer()));
     const { stdout } = await run(ffprobe(), ["-v", "error", "-show_entries", "format=duration:stream=codec_type,width,height,r_frame_rate", "-of", "json", source],
       { timeout: 30_000, maxBuffer: 1_000_000, signal: input.signal });
@@ -237,7 +223,6 @@ async function buildNativeClip(input: ApplyInput, context: ProjectContext) {
     if (!Number.isFinite(duration) || duration < 0.1 || !video?.width || !video?.height || video.width < 64 || video.height < 64) {
       throw new Error("The raw footage does not contain a readable video stream.");
     }
-    if (selected && Math.abs(duration * 1_000_000 - selected.segment.target_timerange.duration) > 100_000) throw new Error("The extracted clip did not match its timeline duration.");
     const framingPolicy = pictureFramingPolicy(input.prompt, Boolean(selected));
     const picture = framingPolicy === 'fill-picture'
       ? await preparePictureMedia({ source, job, name: 'source-picture', canvas: undefined, signal: input.signal }) : undefined;

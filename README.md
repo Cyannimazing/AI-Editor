@@ -82,6 +82,7 @@ After setup, run `pnpm check:setup` to check prerequisites without editing a pro
 - **CapCut/project not detected:** open CapCut once and save a project. Custom locations can be supplied with `AI_EDITOR_CAPCUT_PATH` and `AI_EDITOR_DRAFTS_ROOT` before starting the app. On macOS the application override points to the `.app` bundle; on Windows it points to `CapCut.exe`.
 - **Mac asks for permission to quit/open CapCut:** review the macOS Automation prompt for the app/terminal you are using. Desktop automation permissions are separate from ChatGPT and MCP sign-in. Do not disable Gatekeeper or macOS security protections.
 - **Mac command inventory or effect-packaging tests failed:** see the [29 October compatibility fixes and rerun commands](docs/macos-compatibility-fixes-2026-10-29.md). Startup uses the supported compact command index, and packaging accepts macOS temporary-folder aliases while retaining internal-link checks.
+- **Clip duration does not match the timeline:** the message now shows expected and measured timing. Retry with the current build, then use **Editing progress → Download diagnostics** if it fails. The app collects the report automatically; see [clip preparation and diagnostics](docs/clip-duration-diagnostics-2026-10-29.md).
 
 For a production-mode local server, use `pnpm build` followed by `pnpm start`. Both startup modes prepare the editing packages. Native review checks each candidate separately.
 

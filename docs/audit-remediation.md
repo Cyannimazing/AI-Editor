@@ -1,5 +1,13 @@
 # Technical audit addendum — 2026-10-27
 
+## 2026-10-29 — Clip preparation timing and app diagnostics
+
+The first Mac editing screenshots exposed an uninformative preparation failure. The exact media measurements were absent. A disposable low-FPS source reproduced the same guard failure (2.21s requested, 2.40s prepared). Extraction is now a separate controller service that prepares working media at project FPS, measures video/container duration with frame-aware tolerance, and records the source/timeline/prepared timing. Materially missing footage is still rejected. The original source file and timeline values are retained during preparation.
+
+The UI now downloads a report for the current job and shows structured measurements/redacted stack frames in diagnostic mode. No manual job-ID lookup is required. The authenticated endpoint omits prompts, transcripts and media; known credential patterns and local path prefixes are redacted. Generic error prose stays local because it can quote requested captions; this review finding was reproduced and fixed with an additional privacy regression. A disposable browser/API trial verified the complete Run → measured failure → diagnostic view → downloaded JSON flow, 401/403/200 access checks, unchanged draft/source hashes and no AI worker or CapCut desktop operation for the failing preparation.
+
+All 140 tests were discovered on Windows: 139 passed and one POSIX-only test skipped. Lint and the production build passed. The actual controlled compiler retained native 100%–130% zoom endpoints after low-FPS preparation; additional tests cover VFR, fractional project FPS, retiming/reverse, audio presence and short-source rejection. The exact Mac source/playback has not been diagnosed from screenshots alone. See [clip preparation and diagnostics](clip-duration-diagnostics-2026-10-29.md) for the no-command tester workflow and evidence limits.
+
 ## 2026-10-29 — Returned Mac log and large-output fixture repair
 
 The supplied `mac-test-results.log` reports 130 passes, one failure and two skips out of 133 tests. Compact inventory discovery, active cancellation, POSIX descendant cancellation, native effect metadata/package copying and canonical-alias/internal-link resource checks all passed on that Mac. The Windows-only cancellation test and optional official-builder dependency check were skipped. The log does not contain lint, build or native CapCut acceptance results.

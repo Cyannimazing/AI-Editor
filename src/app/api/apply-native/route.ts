@@ -1,4 +1,4 @@
-import { cancelEditJob, getEditJob, startEditJob, decideEditJob, testEditJob } from "@/lib/edit-jobs";
+import { cancelEditJob, getEditJob, startEditJob, decideEditJob, testEditJob, editJobDiagnostics } from "@/lib/edit-jobs";
 import { endpoint, boundedBody, jsonBody } from "@/server/security/http";
 import { requireAccount } from "@/server/codex/client";
 import { requireIsolation } from "@/server/codex/isolation";
@@ -26,6 +26,11 @@ export const POST = endpoint(async request => {
 });
 export const GET = endpoint(async request => {
   const url = new URL(request.url);
+  if (url.searchParams.get('download') === 'diagnostics') {
+    const report = await editJobDiagnostics(url.searchParams.get('id') ?? '');
+    return new Response(JSON.stringify(report, null, 2), { headers: { 'Content-Type': 'application/json',
+      'Content-Disposition': `attachment; filename="ai-editor-diagnostics-${report.job.id}.json"`, 'X-Content-Type-Options': 'nosniff' } });
+  }
   return Response.json(await getEditJob(url.searchParams.get("id") ?? "", Number(url.searchParams.get("since") ?? 0)));
 });
 export const DELETE = endpoint(async request => Response.json(await cancelEditJob(new URL(request.url).searchParams.get("id") ?? "")));

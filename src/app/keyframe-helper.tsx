@@ -14,7 +14,7 @@ type EditResult = { projectId: string; projectName: string; applied: string[]; t
   model?: string; access?: string; iterations?: number; verified?: boolean; evidencePath?: string; revision: string; previewUrl?: string;
   quality?: { decision: string; summary: string; defects: { component: string; timeSeconds: number; expected: string; observed: string }[];
     techniques: { id: string; name: string; status: string; evidence: string[] }[]; unknowns: string[] } };
-type Job = { id: string; status: "running" | "cancelling" | "cancelled" | "complete" | "failed" | "awaiting_approval" | "committing" | "blocked" | "discarded" | "interrupted"; canCancel: boolean; transcript: string[]; next: number; error?: string; result?: EditResult; previewUrl?: string };
+type Job = { id: string; status: "running" | "cancelling" | "cancelled" | "complete" | "failed" | "awaiting_approval" | "committing" | "blocked" | "discarded" | "interrupted"; canCancel: boolean; transcript: string[]; next: number; error?: string; result?: EditResult; previewUrl?: string; diagnostic?: Record<string, unknown> };
 
 const field = "mt-2 w-full rounded-xl border border-white/15 bg-[#0b1220] px-4 py-3 text-sm text-slate-100 outline-none focus:border-emerald-300";
 const button = "min-h-11 rounded-xl bg-emerald-300 px-5 py-3 text-sm font-semibold text-slate-950 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-40";
@@ -33,6 +33,7 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
   const [status, setStatus] = useState<Job["status"] | "idle">("idle");
   const [transcript, setTranscript] = useState<string[]>([]);
   const [rawTranscript, setRawTranscript] = useState(false);
+  const [diagnostic, setDiagnostic] = useState<Job['diagnostic']>();
   const [result, setResult] = useState<EditResult | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [error, setError] = useState("");
@@ -83,6 +84,7 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
         if (cancelled) return;
         offset.current = data.next;
         setCanCancel(data.canCancel);
+        if (data.diagnostic) setDiagnostic(data.diagnostic);
         if (data.previewUrl) setPreviewUrl(data.previewUrl);
         if (data.transcript.length) setTranscript((current) => [...current, ...data.transcript]);
         if (["running", "cancelling", "committing"].includes(data.status)) timer = setTimeout(poll, 1200);
@@ -116,6 +118,7 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
     setOpenedCopy("");
     setPreviewUrl("");
     setTranscript([]);
+    setDiagnostic(undefined);
     setJobId("");
     offset.current = 0;
     const form = new FormData();
@@ -279,8 +282,9 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
       {(jobId || transcript.length > 0) && <section className="rounded-2xl border border-white/10 bg-[#111b2a] p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">Editing progress</h2><p className="mt-1 text-xs text-slate-400">{status === "cancelling" ? "Stopping tools…" : running ? "Live · analyzing and editing" : status === "complete" ? "Complete" : status === "cancelled" ? "Cancelled" : status === "failed" ? "Could not finish" : status === "blocked" ? "Needs review" : status === "awaiting_approval" ? "Ready for your approval" : "Stopped"}</p></div><button className="min-h-11 px-2 text-xs font-medium text-emerald-300" aria-pressed={rawTranscript} onClick={() => setRawTranscript((value) => !value)}>{rawTranscript ? "Show readable progress" : "Show diagnostic details"}</button></div>
         <p className="mt-4 rounded-lg bg-[#0b1220] p-3 text-xs text-slate-300">You: {prompt}</p>
+        {jobId && <a href={`/api/apply-native?id=${encodeURIComponent(jobId)}&download=diagnostics`} download className="mt-2 inline-flex min-h-11 items-center text-xs font-medium text-emerald-300 hover:text-emerald-200">Download diagnostics</a>}
         <div className="mt-3 max-h-96 space-y-3 overflow-auto rounded-xl border border-white/10 bg-[#080c14] p-4" role="log" aria-live="polite" aria-label="Editing progress">
-          {rawTranscript ? <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-5 text-slate-300">{transcript.join("\n\n") || "Waiting for Codex…"}</pre>
+          {rawTranscript ? <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-5 text-slate-300">{[transcript.join("\n\n"), diagnostic && JSON.stringify(diagnostic, null, 2)].filter(Boolean).join("\n\n") || "Waiting for Codex…"}</pre>
             : progress.length ? progress.map((entry, index) => <p key={index} className={`whitespace-pre-wrap break-words text-sm leading-6 ${entry.kind === 'error' ? 'text-red-300' : entry.kind === 'notice' ? 'text-amber-200' : 'text-slate-300'}`}>{entry.text}</p>)
               : <p className="text-sm text-slate-300">Waiting for the editing AI…</p>}
           <div ref={transcriptEnd} />

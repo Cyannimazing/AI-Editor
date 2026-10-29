@@ -8,6 +8,7 @@ import { openCandidateTestCopy } from "../server/capcut/test-copy";
 import { suggestedReferencePrompt } from "./reference-prompts.mjs";
 import { publicReferenceUrl } from "../server/security/public-reference.mjs";
 import { editingFailureMessage } from "../server/editing/errors.mjs";
+import { captureFailureDiagnostic, buildJobDiagnosticReport } from '../server/editing/diagnostics.mjs';
 import { listProjects } from './keyframe-helper';
 import { resolveEditSelection } from '../server/editing/project-scope.mjs';
 
@@ -18,7 +19,7 @@ type EditResult = Awaited<ReturnType<typeof applyNativeCapCut>>;
 type Status = "running" | "cancelling" | "cancelled" | "awaiting_approval" | "committing" | "complete" | "blocked" | "discarded" | "interrupted" | "failed";
 type EditJob = { id: string; status: Status; canCancel?: boolean; controller?: AbortController; log?: (line: string) => void;
   checkpoint?: { jobPath: string; candidatePath: string; originalDigest: string; previewReady?: boolean };
-  transcript: string[]; transcriptBase?: number; result?: EditResult; error?: string; createdAt: string; updatedAt: string; };
+  transcript: string[]; transcriptBase?: number; result?: EditResult; error?: string; diagnostic?: ReturnType<typeof captureFailureDiagnostic>; createdAt: string; updatedAt: string; };
 export type SavedRecipe = { id: string; name: string; prompt: string; referencePath: string; effects: string[]; sourceName: string; createdAt: string;
   planPath?: string; buildDirectory?: string; sourcePath?: string; workflowVersion?: number; model?: string; access?: string; };
 const store = globalThis as typeof globalThis & { __aiEditorJobs?: Map<string, EditJob> };
@@ -83,7 +84,7 @@ export async function startEditJob(input: { projectId: string; rawVideo?: File |
       if (!job.result.verified) job.error = undefined;
     } catch (error) {
       job.status = controller.signal.aborted ? "cancelled" : "failed";
-      job.error = editingFailureMessage(error); log(job.error);
+      job.error = editingFailureMessage(error); job.diagnostic = captureFailureDiagnostic(error); log(job.error);
     } finally { clearTimeout(deadline); job.canCancel = false; await writes.catch(() => undefined); await persist(job).finally(release); }
   })().catch(() => { job.canCancel = false; job.status = "failed"; job.error = "The job could not save its checkpoint. Candidate files are retained; check local storage before continuing."; });
   return id;
@@ -92,7 +93,7 @@ export async function getEditJob(id: string, since = 0) {
   const job = await loadJob(id);
   const base = job.transcriptBase ?? 0;
   const start = Number.isFinite(since) ? Math.max(0, Math.min(job.transcript.length, Math.floor(since) - base)) : 0;
-  return { id, status: job.status, canCancel: Boolean(job.canCancel), transcript: job.transcript.slice(start), next: base + job.transcript.length, error: job.error,
+  return { id, status: job.status, canCancel: Boolean(job.canCancel), transcript: job.transcript.slice(start), next: base + job.transcript.length, error: job.error, diagnostic: job.diagnostic,
     previewUrl: job.checkpoint?.previewReady ? `/api/artifact?id=${id}&kind=preview` : undefined,
     result: job.result && { projectId: job.result.projectId, projectName: job.result.projectName, applied: job.result.applied,
       toolsUsed: job.result.toolsUsed, notes: job.result.notes, backup: job.result.backup, model: job.result.model,
@@ -101,6 +102,8 @@ export async function getEditJob(id: string, since = 0) {
       previewLabel: job.result.projectPlan ? 'Last edited clip preview; inspect the complete project in CapCut.' : 'Edited clip preview',
       revision: job.result.candidateDigest, previewUrl: `/api/artifact?id=${id}&kind=preview`, evidencePath: job.result.evidencePath } };
 }
+export async function editJobDiagnostics(id: string) { return buildJobDiagnosticReport(await loadJob(id)); }
+
 export async function cancelEditJob(id: string) {
   const job = await loadJob(id);
   if (!["running", "cancelling"].includes(job.status)) return getEditJob(id);
