@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { isAbsolute, join, relative, win32, posix } from 'node:path';
+import { basename, isAbsolute, join, relative, win32, posix } from 'node:path';
 
 const inside = (root, path) => { const offset = relative(root, path); return offset !== '..' && !offset.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(offset); };
 export function effectCacheRoot(platform = process.platform, env = process.env, home = homedir()) {
@@ -86,7 +86,10 @@ export function probeEffectBundle(entry, item, root = effectCacheRoot()) {
     const fingerprint = createHash('sha256');
     for (const file of files.sort((a, b) => a.relative.localeCompare(b.relative))) {
       const bytes = readFileSync(file.path);
-      if (!bytes.length) return incomplete();
+      // CapCut's Motion Blur and Chromatic Quirk bundles ship this generated
+      // RTTI sidecar empty. It is not the entry scene or shader payload. Keep
+      // hashing it, and continue requiring every other file to be non-empty.
+      if (!bytes.length && basename(file.path) !== 'LuaRTTI.MarkGen.lua') return incomplete();
       if (file.relative.endsWith('.json')) JSON.parse(bytes);
       fingerprint.update(file.relative).update('\0').update(bytes);
     }

@@ -3,6 +3,20 @@ import { recoverStructuredReport } from '../src/server/editing/report-recovery.m
 import assert from 'node:assert/strict';
 import { candidateStatusNotes, needsDesignReview, requireAudioEvidence } from '../src/server/editing/quality.mjs';
 import { smokeOutcome } from './smoke-outcome.mjs';
+import * as editingErrors from '../src/server/editing/errors.mjs';
+
+test('Windows capture errors explain the obstruction and never trigger an AI editing repair', () => {
+  const error = Object.assign(new Error('Command failed: powershell.exe -File native-ui-windows.ps1\nNative capture interrupted: another window covers CapCut. XamlWindow 827,0,266,71 sameProcess=False'),
+    { stderr: 'Native capture interrupted: another window covers CapCut. XamlWindow 827,0,266,71 sameProcess=False\r\nAt C:\\app\\native-ui-windows.ps1:139 char:99' });
+  const message = editingErrors.editingFailureMessage(error);
+  assert.match(message, /window or overlay is covering CapCut/);
+  assert.doesNotMatch(message, /Command failed|XamlWindow|char:99/);
+  assert.equal(editingErrors.requiresHostAttention(error), true);
+  assert.equal(editingErrors.requiresHostAttention(new Error('Native capture interrupted: CapCut focus or window changed.')), true);
+  assert.equal(editingErrors.requiresHostAttention(new Error('macOS Accessibility permission is required for the launcher.')), true);
+  assert.equal(editingErrors.requiresHostAttention(new Error('Unsupported curve property: KFBad')), false);
+  assert.equal(editingErrors.editingFailureMessage(Object.assign(new Error('Command failed: node'), { stderr: 'Error: Invalid transform value\n    at compile' })), 'Invalid transform value');
+});
 
 test('native inspection avoids duplicate proxy AI reviews without skipping detected motion defects', () => {
   assert.equal(needsDesignReview(true, []), false);

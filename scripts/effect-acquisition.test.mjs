@@ -55,3 +55,20 @@ test('interrupted extraction waits for metadata, config, payload and a stable fi
   await writeFile(join(folder, 'config.json'), JSON.stringify({ effect: { Link: [{ path: '../escape/' }] } }));
   assert.throws(() => probeEffectBundle(entry, item, root), /Unsafe/);
 });
+
+test('complete CapCut bundles may contain an empty generated RTTI sidecar, but not empty shaders', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'effect-sidecar-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const entry = { is_vip: false, md5: 'b'.repeat(32) }, item = { resource_id: '123456', stdraft_uri: 'vimo://123456' };
+  const folder = join(root, item.resource_id, entry.md5), feature = join(folder, 'feature'); await mkdir(feature, { recursive: true });
+  await writeFile(join(folder, 'extra.json'), '{}');
+  await writeFile(join(folder, 'config.json'), JSON.stringify({ effect: { Link: [{ type: 'AmazingFeature', path: 'feature/' }] } }));
+  await writeFile(join(feature, 'main.scene'), 'scene');
+  await writeFile(join(feature, 'LuaRTTI.MarkGen.lua'), '');
+  assert.equal(probeEffectBundle(entry, item, root).available, true, 'The generated optional sidecar is not a missing effect payload.');
+  await writeFile(join(feature, 'shader.frag'), '');
+  assert.equal(probeEffectBundle(entry, item, root).available, false, 'Empty actual payload is still incomplete.');
+  await writeFile(join(feature, 'shader.frag'), 'shader');
+  await writeFile(join(feature, 'main.scene'), '');
+  assert.equal(probeEffectBundle(entry, item, root).available, false, 'The entry scene is still required.');
+});

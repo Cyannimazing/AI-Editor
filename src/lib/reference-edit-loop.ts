@@ -18,7 +18,7 @@ import { discoverOfficialEffects, officialEffectContext, applyOfficialEffects } 
 import { localEffectBuilder } from '../server/capcut/local-builder.mjs';
 import { integrationCapabilities, effectRoutingReceipt } from '../server/capcut/integration-policy.mjs';
 import { referenceEvidenceContext } from "../server/editing/reference-context.mjs";
-import { editingFailureMessage } from "../server/editing/errors.mjs";
+import { editingFailureMessage, requiresHostAttention } from "../server/editing/errors.mjs";
 import { nativeReviewCapability } from "../server/capcut/review";
 import { captureNativePreview } from "../server/capcut/native-preview.mjs";
 import { assertNoLinks, containedPath } from "../server/security/paths";
@@ -390,11 +390,17 @@ Final output uses the editor result envelope: after a successful apply_edit_plan
     } catch (error) {
       signal?.throwIfAborted();
       const message = editingFailureMessage(error);
+      if (requiresHostAttention(error)) {
+        history.push({ iteration, phase: 'host_attention', message });
+        await writeFile(join(job, 'loop-history.json'), JSON.stringify(history));
+        onLog(`Local runtime needs attention: ${message}`);
+        throw error;
+      }
       repeated = message === previousFailure ? repeated + 1 : 1; previousFailure = message;
       history.push({ iteration, phase: "correction", message });
       await writeFile(join(job, "loop-history.json"), JSON.stringify(history));
       feedback = message.slice(0, 12000); onLog(`Correction needed: ${feedback}`);
-      if (/unavailable to this Codex account|sign in|permission|sandbox/i.test(message) || repeated >= 2) throw error;
+      if (repeated >= 2) throw error;
     }
   }
   throw new Error(`Editing stopped after ${budget} attempts. Original unchanged. ${feedback}`);
