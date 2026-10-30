@@ -120,12 +120,15 @@ export async function decideEditJob(id: string, action: "approve" | "discard", r
     const job = await loadJob(id);
     if (!["awaiting_approval", "blocked"].includes(job.status) || !job.result) throw new Error("This candidate is not awaiting review.");
     if (action === "discard") { job.status = "discarded"; await persist(job); return getEditJob(id); }
-    if (job.status !== "awaiting_approval" || !job.result.verified) throw new Error("Native verification must pass before approval.");
+    if (job.status !== "awaiting_approval" || !job.result.verified) throw new Error("Required editing checks must pass before approval.");
     job.status = "committing"; await persist(job);
-    try { job.result = await approveNativeCandidate(job.result, revision); job.status = "complete";
+    try { job.result = await approveNativeCandidate(job.result, revision); job.status = "complete"; job.error = undefined;
       try { await writeFile(join(logs, `${id}.result.json`), JSON.stringify(job.result)); }
       catch { job.error = "The edit was applied, but its reusable-recipe receipt could not be saved. Check local storage."; } }
-    catch (error) { job.status = "blocked"; job.error = error instanceof Error ? error.message : "Commit failed."; }
+    catch (error) {
+      job.status = (error as { code?: string })?.code === 'CAPCUT_RUNNING' ? 'awaiting_approval' : 'blocked';
+      job.error = error instanceof Error ? error.message : "Commit failed.";
+    }
     await persist(job); return getEditJob(id);
   } finally { await release(); }
 }

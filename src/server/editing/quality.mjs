@@ -16,7 +16,9 @@ export function candidateStatusNotes({ verified, previewReady, quality }) {
   const notes = [previewReady ? 'Approximate preview is available.' : 'Preview is unavailable.'];
   const count = quality?.defects?.length || 0;
   if (count) notes.push(`${count} measured defect${count === 1 ? '' : 's'} still require correction.`);
-  if (verified && quality?.decision === 'ready' && quality.nativeVerified) {
+  if (verified && quality?.decision === 'ready' && quality.reviewMode === 'preview') {
+    notes.push('File and preview checks passed. Review the preview and approve before applying. CapCut playback has not been inspected.');
+  } else if (verified && quality?.decision === 'ready' && quality.nativeVerified) {
     notes.push('Candidate verified. Your approval is required before applying it.');
   } else {
     notes.push(quality?.nativeVerified ? 'Required quality checks remain incomplete.' : 'Native CapCut output has not been verified.');
@@ -26,7 +28,8 @@ export function candidateStatusNotes({ verified, previewReady, quality }) {
 }
 
 /** Reviewers cannot erase each other's findings or turn missing evidence into a pass. */
-export function combineReviews(reports, techniques, nativeVerified, candidateDigest, unresolvedRequirements = []) {
+export function combineReviews(reports, techniques, nativeVerified, candidateDigest, unresolvedRequirements = [], reviewMode = 'native') {
+  if (!['native', 'preview'].includes(reviewMode) || reviewMode === 'preview' && nativeVerified) throw new Error('Invalid review evidence mode.');
   const defects = new Map(), unknowns = new Set(), assessments = [];
   if (reports.length !== 2) unknowns.add('Both independent visual and manager assessments are required.');
   for (const requirement of unresolvedRequirements) {
@@ -63,8 +66,10 @@ export function combineReviews(reports, techniques, nativeVerified, candidateDig
   });
   const hasDefects = defects.size > 0;
   const unresolved = coverage.some(item => item.status !== 'matched') || unknowns.size > 0 || reports.some(report => report.decision !== 'ready');
-  return { version: 1, candidateDigest, decision: hasDefects ? 'revise' : !nativeVerified || unresolved ? 'blocked' : 'ready',
-    summary: hasDefects ? 'Corrections are required.' : !nativeVerified || unresolved ? 'Required verification remains incomplete.' : 'All required comparisons passed.',
+  const evidenceAvailable = nativeVerified || reviewMode === 'preview';
+  return { version: 1, candidateDigest, reviewMode, decision: hasDefects ? 'revise' : !evidenceAvailable || unresolved ? 'blocked' : 'ready',
+    summary: hasDefects ? 'Corrections are required.' : !evidenceAvailable || unresolved ? 'Required verification remains incomplete.'
+      : reviewMode === 'preview' ? 'File and preview checks passed. Review before applying; CapCut playback was not inspected.' : 'All required comparisons passed.',
     defects: [...defects.values()], unknowns: [...unknowns], techniques: coverage, nativeVerified };
 }
 
@@ -85,5 +90,5 @@ export function retainTechniqueContract(required, plan) {
 
 export function qualityAction(report, iteration, budget) {
   if (report.defects.length) return iteration < budget ? 'repair' : 'exhausted';
-  return report.decision === 'ready' && report.nativeVerified && report.techniques.every(item => item.status === 'matched') ? 'approve' : 'needs-evidence';
+  return report.decision === 'ready' && (report.nativeVerified || report.reviewMode === 'preview') && report.techniques.every(item => item.status === 'matched') ? 'approve' : 'needs-evidence';
 }

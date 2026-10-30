@@ -21,6 +21,7 @@ export async function directoryDigest(root: string): Promise<string> {
 /** Rollback replaces the directory, so files introduced by a failed write cannot survive. */
 export async function transactionalWrite(input: {
   project: string; expectedDigest: string; journalRoot: string;
+  beforeWrite?: () => Promise<void>;
   write: () => Promise<void>; validate: () => Promise<void>;
 }) {
   await assertRecoveryClear(input.journalRoot, input.project);
@@ -39,6 +40,13 @@ export async function transactionalWrite(input: {
   await cp(input.project, backup, { recursive: true, errorOnExist: true, force: false });
   if (await directoryDigest(backup) !== input.expectedDigest || await directoryDigest(input.project) !== input.expectedDigest) {
     await checkpoint("conflict"); throw new Error("The original changed during backup. No edit was applied.");
+  }
+  // A failed prerequisite has not mutated the project. Never restore a backup
+  // over a concurrent save, or discard the caller's retryable error code.
+  try { await input.beforeWrite?.(); }
+  catch (error) { await checkpoint("aborted"); throw error; }
+  if (await directoryDigest(input.project) !== input.expectedDigest) {
+    await checkpoint("conflict"); throw new Error("The original changed before commit. No edit was applied.");
   }
   await checkpoint("committing");
   try { await input.write(); await input.validate(); await checkpoint("complete"); }

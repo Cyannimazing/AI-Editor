@@ -1,5 +1,7 @@
 # Native effect acquisition
 
+> Historical desktop workflow / optional developer diagnostics. Normal editing now uses [file and preview review](preview-review-2026-10-30.md) and never opens, closes or captures CapCut. Desktop permissions and automatic resource acquisition described below are not required by Run.
+
 The user authorized automatic acquisition of required free effects through the engine. Paid resources, purchases, footage uploads, arbitrary third-party packages and worker-controlled downloads remain excluded.
 
 Current official material search returns resource IDs, STDraft URIs, descriptions and preview images. It did not return a desktop package URL in the inspected Motion Blur and Flicker responses. The installed local STDraft builder edits an in-memory document; it does not download native desktop bundles. A `vimo://` URI is not a download URL.

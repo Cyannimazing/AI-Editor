@@ -22,12 +22,12 @@ Runtime policies in `src/server/codex/roles.ts` are authoritative. The lead edit
 
 The app now starts a per-job local stdio MCP server. Codex can inspect timed frames, evaluate proposed curves and read the native candidate. Only the lead has the validated candidate-build tool. See `workflows/editing.md` for the tool workflow and `../docs/local-mcp-editing-research.md` for the investigated failures, implementation and evidence. References transfer editing techniques; they do not require scene cloning.
 
-Request → candidate → checks/preview → native verification → manager → bounded corrections → user approval → safe commit.
+Request → candidate → file checks/preview → independent reviewer and manager → bounded corrections → user approval → safe commit.
 
 For multiple eligible clips, a read-only project planner assigns the brief across the active timeline before editing. Entire project is the default scope; a checked clip list restricts eligible IDs. One controller accumulates clip changes and rechecks earlier edits against the final revision. Approval commits once to the originally selected project. Missing cross-clip or existing-layer adapters remain explicit; the planner must not repeat an opening title on every clip or silently omit a requirement.
 
 The controller now schedules separate motion, caption and audio specialists when their work is relevant. Their reports are proposals; only the lead integrates the complete plan. Each technique owns exact component bindings and immutable acceptance criteria. Preview and manager defects are combined, so one reviewer cannot erase another's failure. Per-round plans, specialist reports, execution receipts, structural evidence and quality decisions live in the job directory. The UI displays unresolved techniques and defects.
 
-Normal editing uses saved-file checks and native player inspection, without automatic export. The controller must verify the exact candidate, observed player viewport and timeline positions. Screenshots do not establish native audio playback or real-time smoothness. A calibration pass applies only to its exact fixture, controls and platform; it must never be reused as proof for an unrelated candidate. Real Mac acceptance remains pending.
+Normal editing uses saved-file checks and the app preview. It does not open, close or capture CapCut. Passing review means supported behavior matches the preview and editable saved controls; it does not certify CapCut playback. Missing required resources or renderer coverage remain explicit blockers. Approval rechecks the reviewed files and assets, original project and backup. If CapCut is running, ask the user to save and close it manually before Apply; keep the candidate available for retry.
 
 See `../docs/reference-editing-workflow.md`, `tools.md` and `../docs/audit-remediation.md` for workflow, tool boundaries and current gaps.

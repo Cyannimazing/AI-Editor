@@ -1,6 +1,9 @@
 import { directoryDigest, transactionalWrite } from "../server/editing/transaction";
 import { candidateStatusNotes } from "../server/editing/quality.mjs";
 import { assertNativeEvidence } from "../server/capcut/native-capture.mjs";
+import { assertPreviewEvidence } from '../server/editing/preview-evidence.mjs';
+import { assertCapCutClosed } from '../server/capcut/desktop-policy.mjs';
+import { assertProjectWriteVersion } from '../server/capcut/project-version.mjs';
 import { containedPath, assertNoLinks } from "../server/security/paths";
 import { mediaTool } from "../server/platform/runtime.mjs";
 import { downloadPublicReference } from "../server/security/public-reference.mjs";
@@ -13,7 +16,7 @@ import { listProjects, readProjectDraft, resolveTimelineClip } from "./keyframe-
 import { referenceFrames } from "./reference-media";
 import { pictureFramingPolicy, preparePictureMedia } from "../server/editing/picture-framing.mjs";
 import { extractTimelineClip } from '../server/editing/clip-extraction.mjs';
-import { capcutSession, commitNativeCandidate, readNativeDraft, runReferenceEditLoop } from "./reference-edit-loop";
+import { commitNativeCandidate, readNativeDraft, runReferenceEditLoop } from "./reference-edit-loop";
 import { resolveEditSelection, runScopedBuilds } from '../server/editing/project-scope.mjs';
 import { planProjectEdit } from '../server/editing/project-planner';
 import { reviewFinalProjectClip } from '../server/editing/project-review';
@@ -123,12 +126,13 @@ export async function applyNativeCapCut(input: ApplyInput): Promise<NativeEditRe
   if (activeProjects.has(input.projectId) || desktopInUse) throw new Error('Another edit is active. Wait for it to finish or stop it.');
   activeProjects.add(input.projectId); desktopInUse = true;
   try {
-    if (!input.projectId.startsWith('local:')) await capcutSession('close', undefined, input.signal);
+    input.onLog?.('Reading the last saved project. AI-Editor will not open or close CapCut. Avoid changing this project until the edit is applied.');
     const project = (await listProjects(true, input.signal)).find(item => item.id === input.projectId);
     if (!project) throw new Error('Selected project is unavailable. Refresh projects.');
     const selection = resolveEditSelection(project, input);
     const snapshot = await readProjectDraft(project.id, input.signal);
     await assertNoLinks(project.path);
+    assertProjectWriteVersion(project.path);
     const originalDigest = await directoryDigest(project.path);
     input.onLog?.(`Editing destination: “${project.name}”. Scope: ${selection.mode === 'project' ? 'Entire active timeline' : selection.mode === 'clips' ? `${selection.clipIds.length} selected clips` : 'New footage'}. Approval saves back to this project.`);
     const context: ProjectContext = { project, snapshot, originalDigest, baseline: project.path };
@@ -257,6 +261,7 @@ async function buildNativeClip(input: ApplyInput, context: ProjectContext) {
       !input.savedBuildDirectory || !inside(jobs, resolve(input.savedBuildDirectory)))) throw new Error("The saved skill's build sources are unavailable.");
     const staging = await mkdtemp(join(stagingRoot, "candidate-"));
     await cp(context.baseline, staging, { recursive: true });
+    await assertOriginalUnchanged();
     await run(process.execPath, [join(workspace, "scripts", "capcut-draft.mjs"), "isolate", staging], { timeout: 30000, signal: input.signal });
     await input.onCheckpoint?.({ jobPath: job, candidatePath: staging, originalDigest });
     const loop = await runReferenceEditLoop({ job, candidate: staging, original, source, width: media.width, height: media.height,
@@ -272,10 +277,10 @@ async function buildNativeClip(input: ApplyInput, context: ProjectContext) {
     if (!stagedLint.ok) throw new Error("The staged CapCut edit did not pass draft validation. The project was not changed.");
     await assertOriginalUnchanged();
     if ((await readProjectDraft(project.id)).raw !== snapshot.raw) throw new Error("The CapCut timeline changed while planning. Refresh and run again; no edit was written.");
-    input.onLog?.(loop.verified ? "Candidate verified. Waiting for your approval before applying changes."
+    input.onLog?.(loop.verified ? "File and preview checks passed. Waiting for your approval before applying changes."
       : loop.quality?.defects.length ? "The candidate still has measured defects and has not passed comparison. It is retained for inspection; the original is unchanged."
         : loop.quality?.nativeVerified ? "Native output captured. Required quality checks remain incomplete; original project is unchanged."
-          : "Candidate prepared. Native verification is unavailable; original project is unchanged.");
+          : "Candidate prepared with unresolved preview or resource limitations; original project is unchanged.");
     return { projectId: project.id, projectName: project.name, applied: manifest.effects.map((effect) => effect.technique),
       toolsUsed: manifest.toolsUsed, notes: candidateStatusNotes({ verified: loop.verified, previewReady: existsSync(join(job, 'preview.mp4')), quality: loop.quality }), backup: "", jobPath: job, candidatePath: staging, originalDigest, candidateDigest: await directoryDigest(staging),
       referencePath: reference.path, effects: manifest.effects, prompt: input.prompt, sourceName: selected?.material.material_name || input.rawVideo?.name || "Timeline clip",
@@ -285,24 +290,24 @@ async function buildNativeClip(input: ApplyInput, context: ProjectContext) {
 }
 
 export async function approveNativeCandidate(result: Awaited<ReturnType<typeof applyNativeCapCut>>, revision: string) {
-  if (!result.verified || revision !== result.candidateDigest) throw new Error("Only the exact natively verified candidate can be approved.");
+  if (!result.verified || revision !== result.candidateDigest) throw new Error("Only the exact reviewed candidate can be approved.");
   const candidate = await containedPath(join(workspace, ".local-tools", "staging"), result.candidatePath);
   await assertNoLinks(candidate);
   if (await directoryDigest(candidate) !== revision) throw new Error("Candidate changed after review. A new review is required.");
-  await assertNativeEvidence(result.jobPath, candidate, result.evidencePath);
+  const assertEvidence = result.quality?.reviewMode === 'preview' ? assertPreviewEvidence : assertNativeEvidence;
+  await assertEvidence(result.jobPath, candidate, result.evidencePath);
   for (const evidence of result.nativeEvidenceSet || []) {
     const job = await containedPath(join(workspace, '.local-tools/native-assets'), evidence.jobPath);
-    await assertNativeEvidence(job, candidate, evidence.evidencePath);
+    await assertEvidence(job, candidate, evidence.evidencePath);
   }
   const project = (await listProjects()).find(item => item.id === result.projectId);
   if (!project) throw new Error("Original project is unavailable.");
-  await capcutSession("close");
+  await assertCapCutClosed();
   const committed = await transactionalWrite({ project: project.path, expectedDigest: result.originalDigest,
     journalRoot: join(workspace, ".local-tools", "transactions"),
-    write: () => commitNativeCandidate(candidate, project.path),
+    beforeWrite: async () => { await assertCapCutClosed(); assertProjectWriteVersion(project.path); assertProjectWriteVersion(candidate); },
+    write: async () => { await commitNativeCandidate(candidate, project.path); },
     validate: async () => { const lint = JSON.parse((await capcut(["lint", project.path, "--json"])).stdout); if (!lint.ok) throw new Error("Committed draft failed validation."); },
   });
-  let note = "";
-  try { await capcutSession("open", project.path); } catch { note = " Saved successfully; open the project in CapCut manually."; }
-  return { ...result, backup: committed.backup, notes: result.notes + note };
+  return { ...result, backup: committed.backup, notes: result.notes + ' Saved successfully. Open the project in CapCut yourself when you are ready.' };
 }

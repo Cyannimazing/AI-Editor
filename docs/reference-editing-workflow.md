@@ -24,12 +24,12 @@ Run structural/path checks and prepare a preview. Separate reviewer and manager 
 
 Allow one build plus at most three corrections within 30 minutes. Stop on repeated identical failure or unavailable account/model/security capabilities. Standard speed is used, with one permitted high-reasoning Sol escalation. Usage savings remain unmeasured.
 
-The trusted native adapter opens the exact candidate, inspects editable controls and captures its player at checked timeline positions, binding evidence to revision and platform/CapCut version. Normal jobs never export. Missing player/audio evidence and unsupported layouts remain unverified. See `native-player-verification.md` for current platform scope.
+Normal review checks saved controls and timed app-preview frames. It never opens, closes or captures CapCut or exports a video. A passing receipt binds the candidate, media/fonts/effect resources, preview and independent assessments. For multi-clip jobs, earlier intervals must remain identical, including overlapping layers, material dependencies, global settings and boundary transitions. Native appearance is not certified; required techniques outside preview coverage remain unresolved. See `preview-review-2026-10-30.md`.
 
 ## Approve and commit
 
-Require explicit approval of the exact verified digest. Check the original is unchanged, acquire the lock, close CapCut gracefully and create a complete backup before writing. Journal each commit phase and validate the saved result.
+Require explicit approval of the exact verified digest. Check the original is unchanged, acquire the lock, confirm CapCut is closed using a read-only process check and create a complete backup before writing. If CapCut is running, retain the candidate and ask the user to save/close it manually before retrying Apply. Never send Quit or Open. Journal each commit phase and validate the saved result.
 
 On failure, restore the whole directory so candidate-only files cannot survive. Interrupted commit/restore journals block later writes until recovery is inspected. Automatic continuation from every possible crash checkpoint remains unfinished.
 
-Save reusable recipes only after successful review/commit and the user's Save action. They are internal method/evidence snapshots, not portable CapCut presets.
+Reusable technique saving remains deferred for this release.

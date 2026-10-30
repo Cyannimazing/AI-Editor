@@ -4,7 +4,7 @@ The official plugin and the community native desktop CLI serve different represe
 
 The controller uses an official-plugin-first strategy where a tested local desktop mapping exists. `capcut-integration.json` records available providers; `capcut-routing-N.json` records the actual provider, resource and control checks for each effect. The desktop adapter remains responsible for native project writes and existing text/audio/keyframe controls. Never report a local fallback as a plugin application. No automatic export, upload, paid generation or cloud save is part of normal editing.
 
-The plan's explicit `composition` effect target maps an interval-wide optical treatment to the native global composite. Layer targets retain their distinct scope; never broaden them just to make an effect visible. The controller rejects composition effects that would touch unrelated original visual content. Native captured output remains required for both scopes, and experimental clip bindings must not be assumed functional.
+The plan's explicit `composition` effect target maps an interval-wide optical treatment to the native global composite. Layer targets retain their distinct scope; never broaden them just to make an effect visible. The controller rejects composition effects that would touch unrelated original visual content. Native appearance is not certified by preview review; experimental clip bindings must not be assumed functional. Requested optical behavior outside preview coverage remains unresolved.
 
 ## Translate prompts into supported editing operations
 
@@ -32,7 +32,7 @@ For a unique matching no-cost catalog effect, the host invokes the installed off
 
 The host retains the plugin result, native binding, resource hashes and execution receipts in the job. Complete effect bundles travel with published review projects. This is AI-Editor's desktop adapter, not an official STDraft-to-desktop converter. Construction, local resource availability and native playback are separately recorded. The tested bridge targets installed plugin 0.2.6 and requires Python 3; other versions need an adapter check.
 
-Missing pinned free packages trigger controller-owned acquisition: open a disposable synthetic timeline referencing the official resource, let CapCut download it, wait for the expected resource/version directory, validate the bundle and read its controls. The controller reuses existing cache entries and attempts each missing resource/version once per job in batches of up to eight, with a 90-second cache wait and cancellation. It closes the acquisition project before continuing. This is a desktop operation with no source footage, upload, export, purchase or private download endpoint. Windows first-open acquisition has been exercised; macOS uses its platform adapter but still needs real hardware acceptance. Inspect acquisition receipts independently of native visual evidence. A missing or invalid package cannot be reported as an applied technique.
+Normal editing resolves already installed free packages only. It must not open or close CapCut to download resources. A missing or invalid package is reported explicitly; the engine may propose a supported alternative construction that preserves the requested technique. Legacy acquisition helpers are developer diagnostics, not part of Run, review or Apply.
 
 ## Discover resources correctly
 

@@ -19,7 +19,7 @@ capcut catalogue <technique-or-resource-name> --limit 12
 capcut enums --scene-effects
 ```
 
-Discover the category instead of guessing an ID. The installed catalog also contains transitions, masks, image and text animations, character effects, audio effects, filters and speech bubbles. `catalogue` searches across categories. Catalog availability, free/VIP metadata, a downloaded resource, successful opening and successful rendering are separate facts. Reject known paid entries; an unknown cost is not authorization to spend. Native evidence is still required.
+Discover the category instead of guessing an ID. The installed catalog also contains transitions, masks, image and text animations, character effects, audio effects, filters and speech bubbles. `catalogue` searches across categories. Catalog availability, free/VIP metadata, a downloaded resource, successful opening and successful rendering are separate facts. Reject known paid entries; an unknown cost is not authorization to spend. Resource existence does not certify native playback; normal review uses saved controls and supported preview behavior.
 
 In restricted editing sessions, call local MCP `discover_capabilities` with a topic (`motion`, `effects`, `layers`, `text`, `audio`, `timeline`) and short query instead of running the CLI yourself. It reads the installed version's exact contracts and no-cost bundled catalog entries. It also distinguishes controls already integrated into the app from operations requiring another adapter. Compose equivalent techniques from available primitives; never pretend a discovered command executed or silently replace a required technique with an unrelated effect.
 
@@ -54,7 +54,7 @@ For continuous movement, check velocity between keys. Repeating ease-in-out at e
 
 Seed empty projects from a project authored by the installed CapCut version. The bundled older template can produce an “unusual path” error on newer builds even when its path is correct. Preserve native format/version markers and validated active-timeline pointers. Never suppress version/write guards with `--force-write`.
 
-The app can maintain several root/nested timeline documents. Inspect their consistency; do not overwrite a live project while CapCut is saving. Only trusted services close/open the desktop, publish separate review projects, register materials and commit originals.
+The app can maintain several root/nested timeline documents. Inspect their consistency; do not overwrite a live project while CapCut is saving. Normal editing never opens or closes the desktop or publishes a review project. Trusted services register materials and commit originals only after evidence checks, explicit approval and a read-only check that CapCut is closed.
 
 `lint` checks structure/dependencies. `diagnose` and `version` assist compatibility review. `batch --plan` / `--apply-plan` bind a reviewed operation list to a draft hash; do not use `--continue-on-error` to disguise an incomplete edit.
 
@@ -72,7 +72,7 @@ The v4 text contract supports native bold/italic ranges and installed local TTF/
 
 Text size conversion and preview decoding now share `src/server/editing/native-text.mjs` (relative units based on the short canvas dimension). Portrait type must not be divided by the long canvas height. The browser reads the saved native text, fill, size and font path, rather than substituting the intended plan. This removes an internal inconsistency; native font substitution and exact glyph metrics still need export calibration. The older landscape fixture only checked text presence, not matching text bounds, so it must not be cited as typography certification.
 
-Catalog entries and the CLI's inline starter effects can have different IDs. The host pins the actual no-cost catalog resource IDs it checked, records the written IDs and still requires observed native playback.
+Catalog entries and the CLI's inline starter effects can have different IDs. The host pins the actual no-cost catalog resource IDs it checked, records the written IDs and distinguishes construction from native appearance. Normal preview review cannot certify effects omitted by its renderer.
 
 Effect `target` can be `source`, `overlay-N`, `text-N`, or `composition`. Choose `composition` only for an optical treatment intended to affect the complete generated scene over its interval. It writes the native global-composite scope, used by the official builder's interval-wide effects. The compiler rejects this scope when unrelated original visual content overlaps; it never changes a layer-specific request into a global effect automatically. Scope is explicit in execution receipts.
 

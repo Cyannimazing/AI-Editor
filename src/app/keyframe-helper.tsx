@@ -13,7 +13,7 @@ type Project = { id: string; name: string; hasTimelineContent: boolean; clips: C
 type EditResult = { projectId: string; projectName: string; applied: string[]; toolsUsed: string[]; notes: string; backup: string;
   scope?: string; selectedClipIds?: string[]; previewLabel?: string; projectPlan?: { summary: string; clips: { clipId: string; action: string; instruction: string; reason: string }[]; unsupported: string[] };
   model?: string; access?: string; iterations?: number; verified?: boolean; evidencePath?: string; revision: string; previewUrl?: string;
-  quality?: { decision: string; summary: string; defects: { component: string; timeSeconds: number; expected: string; observed: string }[];
+  quality?: { reviewMode?: 'preview' | 'native'; nativeVerified?: boolean; decision: string; summary: string; defects: { component: string; timeSeconds: number; expected: string; observed: string }[];
     techniques: { id: string; name: string; status: string; evidence: string[] }[]; unknowns: string[] } };
 type Job = { id: string; status: "running" | "cancelling" | "cancelled" | "complete" | "failed" | "awaiting_approval" | "committing" | "blocked" | "discarded" | "interrupted"; canCancel: boolean; transcript: string[]; next: number; error?: string; result?: EditResult; previewUrl?: string; diagnostic?: Record<string, unknown> };
 
@@ -39,8 +39,6 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
   const [previewUrl, setPreviewUrl] = useState("");
   const [error, setError] = useState("");
   const [starting, setStarting] = useState(false);
-  const [opening, setOpening] = useState(false);
-  const [openedCopy, setOpenedCopy] = useState("");
   const [includeLocal, setIncludeLocal] = useState(false);
   const [canCancel, setCanCancel] = useState(false);
   const offset = useRef(0);
@@ -116,7 +114,6 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
     setCanCancel(false);
     setError("");
     setResult(null);
-    setOpenedCopy("");
     setPreviewUrl("");
     setTranscript([]);
     setDiagnostic(undefined);
@@ -173,36 +170,6 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
     finally { setStarting(false); }
   }
 
-  async function openProject() {
-    try {
-      const response = await apiFetch("/api/helper", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "open-project", projectId: result?.projectId || projectId }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not open CapCut.");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not open CapCut.");
-    }
-  }
-
-  async function openTestCopy() {
-    if (!result || !jobId || opening) return;
-    setOpening(true); setError("");
-    try {
-      const response = await apiFetch("/api/apply-native", { method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: jobId, action: "open-test-copy", revision: result.revision }) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Could not open the test copy.");
-      setOpenedCopy(data.projectName);
-      void refresh().catch(() => undefined);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not open the test copy."); }
-    finally {
-      setOpening(false);
-      // This job has already stopped polling; fetch the action's new receipt/failure.
-      void apiFetch(`/api/apply-native?id=${jobId}`).then(async response => {
-        if (response.ok) { const job: Job = await response.json(); setDiagnostic(job.diagnostic); }
-      }).catch(() => undefined);
-    }
-  }
 
   async function createProject() {
     setStarting(true); setError("");
@@ -275,7 +242,7 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
 
       <section className="rounded-2xl border border-white/10 bg-[#111b2a] p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <div><h2 className="text-lg font-semibold">Run the edit</h2><p className="mt-1 text-xs font-medium text-emerald-300">{editorPolicy.displayName} · Restricted candidate workspace</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400">The editor builds a separate candidate, then reviewers check the evidence. Watch the design preview here. Applying changes requires native CapCut verification and your approval.</p>{status === "cancelled" && <p className="mt-2 text-sm text-amber-200" role="status">Run cancelled. No edit was written to CapCut.</p>}</div>
+          <div><h2 className="text-lg font-semibold">Run the edit</h2><p className="mt-1 text-xs font-medium text-emerald-300">{editorPolicy.displayName} · Restricted candidate workspace</p><p className="mt-1 max-w-2xl text-xs leading-5 text-slate-400">The editor builds a separate candidate, then reviewers check the evidence. Watch the design preview here. Review uses project files and the preview. AI-Editor does not open or close CapCut. Save your work first; close CapCut yourself before applying approved changes.</p>{status === "cancelled" && <p className="mt-2 text-sm text-amber-200" role="status">Run cancelled. No edit was written to CapCut.</p>}</div>
           <div className="flex flex-wrap gap-3"><button className={button} disabled={!setupComplete || running || !targetReady || !prompt.trim()} onClick={() => void runEdit()}>{starting ? "Starting…" : status === "cancelling" ? "Cancelling…" : running ? "Codex is editing…" : "Run"}</button>
           {jobId && running && <button className="min-h-11 rounded-xl border border-amber-300/40 px-5 py-3 text-sm font-semibold text-amber-100 hover:bg-amber-300/10 disabled:cursor-not-allowed disabled:opacity-40" disabled={!canCancel || status === "cancelling"} onClick={() => void cancelRun()}>{status === "cancelling" ? "Stopping tools…" : canCancel ? "Cancel run" : "Finishing write…"}</button>}</div>
         </div>
@@ -302,8 +269,8 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
         <h2 className="text-xl font-semibold">{status === "complete" ? "Edit applied to" : "Candidate for"} {result.projectName}</h2>
         {result.projectPlan && <p className="mt-2 text-sm text-slate-300">Project plan: {result.projectPlan.summary}</p>}
         <p className="mt-2 text-sm text-slate-300">Requested techniques: {result.applied.join(", ")}.</p>
-        {result.verified && <p className="mt-2 text-sm text-emerald-300">Native comparison passed after {result.iterations} {result.iterations === 1 ? "iteration" : "iterations"} · {result.model} · {result.access}</p>}
-        <p className="mt-2 text-xs text-slate-400">Tools used: {result.toolsUsed.join(", ") || "CapCut CLI"}. {result.verified ? "Native verification passed." : "Quality verification is incomplete. The candidate is available for inspection; your original has not been changed."}</p>
+        {result.verified && <p className="mt-2 text-sm text-emerald-300">{result.quality?.reviewMode === 'preview' ? 'File and preview checks passed' : 'Native comparison passed'} after {result.iterations} {result.iterations === 1 ? "iteration" : "iterations"} · {result.model} · {result.access}</p>}
+        <p className="mt-2 text-xs text-slate-400">Tools used: {result.toolsUsed.join(", ") || "CapCut CLI"}. {result.verified ? (result.quality?.reviewMode === "preview" ? "CapCut playback was not inspected." : "Native verification passed.") : "Quality verification is incomplete. The candidate is available for inspection; your original has not been changed."}</p>
         {result.quality && <div className="mt-4 rounded-xl border border-amber-300/20 p-4">
           <p className="text-sm font-semibold">{result.quality.summary}</p>
           <ul className="mt-3 space-y-2 text-sm">{result.quality.techniques.map(technique => <li key={technique.id}>
@@ -315,15 +282,13 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
         {result.notes && <p className="mt-2 text-xs text-slate-400">{result.notes}</p>}
         {result.previewUrl && <div className="mt-5"><p className="mb-2 text-sm text-slate-300">{result.previewLabel || 'Design preview'} · CapCut-specific effects may differ</p><video controls preload="metadata" src={result.previewUrl} className="max-h-96 w-full rounded-xl bg-black" /></div>}
         <div className="mt-5 flex flex-wrap gap-3">
-          {status === "complete" && <button className={button} onClick={() => void openProject()}>Open project in CapCut</button>}
+          {status === "complete" && <p role="status" className="text-sm text-emerald-200">Saved. Open this project in CapCut yourself when you are ready.</p>}
           {["awaiting_approval", "blocked"].includes(status) && <>
             <button className={button} disabled={!result.verified || status !== "awaiting_approval" || starting} onClick={() => void decide("approve")}>Apply to {result.projectName}</button>
-            <button className="min-h-11 rounded-xl border border-white/20 px-5 py-3 text-sm" disabled={opening || starting} onClick={() => void openTestCopy()}>{opening ? "Opening CapCut…" : "Inspect temporary review copy"}</button>
             <button className="min-h-11 rounded-xl border border-white/20 px-5 py-3 text-sm" onClick={() => void decide("discard")}>Discard candidate</button>
           </>}
           {status === "discarded" && <p role="status">Candidate discarded. Original unchanged.</p>}
         </div>
-        {openedCopy && <p role="status" className="mt-4 text-sm text-emerald-200">Test copy registered as “{openedCopy}”. Select it in CapCut’s project list if CapCut opens its home screen. The original is unchanged.</p>}
         {result.backup && <p className="mt-4 break-all text-xs text-slate-500">Project backup: {result.backup}</p>}
         {result.evidencePath && <p className="mt-2 break-all text-xs text-slate-500">Review evidence: {result.evidencePath}</p>}
       </section>}

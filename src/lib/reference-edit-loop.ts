@@ -11,7 +11,7 @@ import { guardSourceMotion, motionCurveReport, plannedMotionDefects } from '../s
 import { includeMotionDefects } from '../server/editing/motion-coverage.mjs';
 import { editingScope, assertEditingScope } from '../server/editing/edit-scope.mjs';
 import { availableTextFonts } from '../server/editing/text-fonts.mjs';
-import { retainTechniqueContract, combineReviews, qualityAction, needsDesignReview, requireAudioEvidence } from '../server/editing/quality.mjs';
+import { retainTechniqueContract, combineReviews, qualityAction, requireAudioEvidence } from '../server/editing/quality.mjs';
 import { toolKnowledge } from "../server/setup/tool-knowledge";
 import { capcutPluginStatus, searchCapcutMaterials } from "../server/capcut/plugin";
 import { discoverOfficialEffects, officialEffectContext, applyOfficialEffects } from '../server/capcut/effect-application';
@@ -20,8 +20,9 @@ import { integrationCapabilities, effectRoutingReceipt } from '../server/capcut/
 import { referenceEvidenceContext } from "../server/editing/reference-context.mjs";
 import { editingFailureMessage, requiresHostAttention } from "../server/editing/errors.mjs";
 import { captureFailureDiagnostic } from '../server/editing/diagnostics.mjs';
-import { nativeReviewCapability } from "../server/capcut/review";
-import { captureNativePreview } from "../server/capcut/native-preview.mjs";
+import { sealPreviewEvidence, snapshotPreviewInputs } from '../server/editing/preview-evidence.mjs';
+import { previewCoverageIssues } from '../server/editing/preview-coverage.mjs';
+import { refuseDesktopControl } from '../server/capcut/desktop-policy.mjs';
 import { assertNoLinks, containedPath } from "../server/security/paths";
 import { directoryDigest } from "../server/editing/transaction";
 import { runCancellableProcess } from "./cancellable-process";
@@ -37,10 +38,10 @@ import type { NativeDraft, NativeManifest, ReferenceAnalysis } from "./native-ed
 const run = promisify(execFile);
 const workspace = process.cwd();
 const draftHelper = join(workspace, "scripts", "capcut-draft.mjs");
-const sessionHelper = join(workspace, "scripts", "capcut-session.mjs");
 const cli = join(workspace, "toolchain", "node_modules", "capcut-cli", "dist", "index.js");
 export async function capcutSession(action: "close" | "open", project?: string, signal?: AbortSignal) {
-  await run(process.execPath, [sessionHelper, action, ...(project ? [project] : [])], { cwd: workspace, timeout: 45000, signal, windowsHide: true });
+  void action; void project; signal?.throwIfAborted();
+  refuseDesktopControl();
 }
 
 export async function nativeDigest(project: string) {
@@ -64,7 +65,8 @@ export async function runReferenceEditLoop(input: {
   framing?: { policy: string; preparation?: unknown };
   onLog: (line: string) => void; signal?: AbortSignal; assertOriginalUnchanged: () => Promise<void>;
   onPreview?: () => Promise<void>;
-}) {
+}): Promise<{ manifest: NativeManifest; iterations: number; model: string; access: string; verified: boolean;
+  evidencePath: string; quality: ReturnType<typeof combineReviews>; diagnostic?: ReturnType<typeof captureFailureDiagnostic> }> {
   const { job, candidate, reference, onLog, signal } = input;
   const scope = editingScope(input.prompt);
   const budget = Number(process.env.AI_EDITOR_MAX_ITERATIONS ?? 4);
@@ -88,7 +90,7 @@ export async function runReferenceEditLoop(input: {
   const plugin = await capcutPluginStatus().catch(() => ({ authorization: "unavailable", capabilities: { materialSearch: false } }));
   const integration = integrationCapabilities({ materialSearch: plugin.capabilities.materialSearch, localBuilder: localEffectBuilder().available });
   await writeFile(join(job, 'capcut-integration.json'), JSON.stringify(integration));
-  onLog(`CapCut integration: ${integration.discovery === 'official-capcut-plugin' ? 'official plugin discovery, local builder and desktop adapter' : 'local catalog; official material search is unavailable'}. No automatic export.`);
+  onLog(`CapCut integration: ${integration.discovery === 'official-capcut-plugin' ? 'official plugin discovery and local file builder' : 'local catalog; official material search is unavailable'}. Reviewing files and preview; CapCut will not be opened or closed.`);
   const effectCatalog = [...(knowledge.capcut.catalogs.scene_effects || []), ...(knowledge.capcut.catalogs.character_effects || [])]
     .filter(entry => (entry as { is_vip?: boolean }).is_vip === false) as Parameters<typeof discoverOfficialEffects>[0]['catalog'];
   const nativeEffects = scope === 'keyframes' ? [] : effectCatalog.map(entry => entry.slug);
@@ -276,7 +278,8 @@ Final output uses the editor result envelope: after a successful apply_edit_plan
         editableText: draft.materials.texts?.filter(text => segments.some(segment => segment.material_id === text.id)) }));
       await writeFile(join(job, "editing-plan.json"), JSON.stringify(plan));
       await writeFile(join(job, "manifest.json"), JSON.stringify(manifest));
-      onLog("Preparing a design preview. CapCut-specific effects still require native verification.");
+      const previewInputs = await snapshotPreviewInputs(candidate);
+      onLog("Preparing the app preview from saved editing controls. CapCut-specific effects may render differently.");
       let previewReady = false;
       try {
         await runCancellableProcess(process.execPath, [join(workspace, "scripts", "render-preview.mjs"), job, candidate],
@@ -318,16 +321,18 @@ Final output uses the editor result envelope: after a successful apply_edit_plan
         }
       }
       catch { signal?.throwIfAborted(); onLog("Preview images are unavailable; visual comparison cannot be completed."); }
-      let findings = combineReviews([], proposed.techniques, false, await directoryDigest(candidate), [...proposed.unsupported, ...(manifest.verificationGaps || [])]);
-      const capability = nativeReviewCapability();
-      if (previewFrames.length && needsDesignReview(capability.available, motionDefects)) {
-        onLog("Reviewing: visual reviewer and quality manager are checking the design evidence.");
+      let findings = combineReviews([], proposed.techniques, false, await directoryDigest(candidate), [...proposed.unsupported, ...(manifest.verificationGaps || [])], 'preview');
+      if (previewFrames.length) {
+        onLog("Reviewing: visual reviewer and quality manager are checking the preview and saved controls.");
         findings = await reviewAndManage({ job, candidate, request: input.prompt, referenceFrames: reference.frames,
-          previewFrames, comparisonFrames, comparisonContext, referenceEvidence, previewEvidence, nativeVerified: false, iteration, signal, onLog });
-      } else if (capability.available) {
-        onLog('Fast checks complete. Independent reviewers will assess the actual CapCut player instead of repeating an approximate-preview review.');
+          previewFrames, comparisonFrames, comparisonContext, referenceEvidence, previewEvidence, nativeVerified: false, reviewMode: 'preview', iteration, signal, onLog });
       }
       const mixReport = await readFile(join(job, `audio-mix-report-${iteration}.json`), 'utf8').then(JSON.parse).catch(() => null);
+      const renderedPlan = previewReady ? await readFile(join(job, `preview-plan-${iteration}.json`), 'utf8').then(JSON.parse) : null;
+      const coverageIssues = previewCoverageIssues(draft, execution.refs, { start: input.start, duration: input.duration }, renderedPlan);
+      await writeFile(join(job, `preview-coverage-${iteration}.json`), JSON.stringify({ candidateDigest: findings.candidateDigest, issues: coverageIssues }));
+      if (coverageIssues.length) findings = { ...findings, decision: findings.defects.length ? 'revise' : 'blocked',
+        unknowns: [...new Set([...findings.unknowns, ...coverageIssues])], summary: 'The preview does not cover every required component. Review is incomplete.' };
       findings = includeMotionDefects(findings, motionDefects, proposed.techniques);
       if (mixReport) findings = includeAudioDefects(findings, mixReport, proposed.techniques);
       findings = requireAudioEvidence(findings, Boolean(proposed.audio?.clips.length), Boolean(mixReport));
@@ -341,54 +346,17 @@ Final output uses the editor result envelope: after a successful apply_edit_plan
         await writeFile(join(job, 'loop-history.json'), JSON.stringify(history));
         return { manifest, iterations: iteration, model: editingAgent.model, access: editingAgent.access, verified: false, evidencePath: '', quality: findings };
       }
-      const revision = await directoryDigest(candidate);
-      if (!capability.available) {
-        onLog(capability.reason);
-        history.push({ iteration, phase: "native_verification_blocked", message: capability.reason });
-        await writeFile(join(job, "loop-history.json"), JSON.stringify(history));
-        await writeFile(join(job, "review.json"), JSON.stringify({ matched: false, nativeOutput: "unavailable", candidateDigest: revision, notes: capability.reason }));
-        return { manifest, iterations: iteration, model: editingAgent.model, access: editingAgent.access, verified: false, evidencePath: "", quality: findings };
-      }
-      let captured;
-      try {
-        captured = await captureNativePreview({ job, candidate, revision, start: input.start, duration: input.duration,
-          width: input.width, height: input.height, signal, onLog });
+      let evidencePath = '';
+      if (action === 'approve') {
         await input.assertOriginalUnchanged();
-      } catch (error) {
-        signal?.throwIfAborted();
-        const reason = editingFailureMessage(error);
-        onLog(`Native verification needs attention: ${reason}`);
-        findings = { ...findings, decision: 'blocked', unknowns: [...findings.unknowns, `Native capture: ${reason}`] };
-        history.push({ iteration, phase: 'native_capture_failed', message: reason });
-        await writeFile(join(job, 'loop-history.json'), JSON.stringify(history));
-        await writeFile(join(job, 'quality-report.json'), JSON.stringify(findings));
-        return { manifest, iterations: iteration, model: editingAgent.model, access: editingAgent.access, verified: false, evidencePath: '', quality: findings,
-          diagnostic: captureFailureDiagnostic(error) };
-      }
-      const nativeFrames = captured.nativeFrames;
-      const nativeIndex = JSON.parse(await readFile(nativeFrames.indexPath, 'utf8'));
-      const nativeTiming = referenceEvidenceContext(nativeFrames, nativeIndex);
-      const nativeAudit = await auditMotionFrames(job, referenceIndex, nativeIndex, motionEvidence, iteration, signal);
-      const nativeComparisons = await buildMotionComparisons(job, proposed, referenceIndex, sourceIndex, nativeIndex, iteration, signal, nativeAudit.defects.map((defect: { timeSeconds: number }) => defect.timeSeconds));
-      onLog('Comparing actual CapCut output: visual reviewer and quality manager are assessing every technique.');
-      findings = await reviewAndManage({ job, candidate, request: input.prompt, referenceFrames: reference.frames,
-        previewFrames: nativeFrames.frames, comparisonFrames: nativeComparisons.images?.map((item: { path: string }) => item.path) || [],
-        comparisonContext: nativeComparisons.layout, referenceEvidence, previewEvidence: nativeTiming, nativeVerified: true,
-        nativeReceiptPath: captured.receiptPath, iteration, signal, onLog });
-      findings = includeMotionDefects(findings, nativeAudit.defects, proposed.techniques);
-      if (mixReport) findings = includeAudioDefects(findings, mixReport, proposed.techniques);
-      findings = requireAudioEvidence(findings, Boolean(proposed.audio?.clips.length), Boolean(mixReport));
-      await writeFile(join(job, `native-quality-${iteration}.json`), JSON.stringify(findings));
-      await writeFile(join(job, 'quality-report.json'), JSON.stringify(findings));
-      previousPreviewFrames = nativeFrames.frames; previousPreviewEvidence = `Native CapCut output: ${nativeTiming}`;
-      previousComparisonFrames = nativeComparisons.images?.map((item: { path: string }) => item.path) || [];
-      previousComparisonContext = nativeComparisons.layout;
-      const nativeAction = qualityAction(findings, iteration, budget);
-      history.push({ iteration, phase: `native_${nativeAction}`, message: findings.summary });
+        evidencePath = await sealPreviewEvidence({ inputs: previewInputs, job, candidate, iteration, quality: findings,
+          interval: { start: input.start, duration: input.duration }, evidenceFiles: previewFrames.concat(comparisonFrames) });
+        onLog('File and preview checks passed. Review the preview before applying; CapCut playback was not inspected.');
+      } else onLog('The candidate is retained with its unresolved preview or resource limitations. CapCut was not opened or closed.');
       await writeFile(join(job, 'loop-history.json'), JSON.stringify(history));
-      if (nativeAction === 'repair') throw new Error(JSON.stringify(findings.defects).slice(0, 10000));
       return { manifest, iterations: iteration, model: editingAgent.model, access: editingAgent.access,
-        verified: nativeAction === 'approve', evidencePath: captured.receiptPath, quality: findings };
+        verified: action === 'approve', evidencePath, quality: findings };
+
     } catch (error) {
       signal?.throwIfAborted();
       const message = editingFailureMessage(error);

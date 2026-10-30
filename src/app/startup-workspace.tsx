@@ -73,7 +73,7 @@ export default function StartupWorkspace() {
     <div className="border-b border-white/10 bg-[#111b2a] px-6 py-3 text-sm text-slate-300">
       <button className="mr-4 min-h-11 text-emerald-300 underline" onClick={() => setWorkspace(false)}>Setup and connections</button>
       <button className="mr-4 min-h-11 text-emerald-300 underline" aria-expanded={connectionsOpen} onClick={() => setConnectionsOpen(value => !value)}>Tools &amp; CapCut connection</button>
-      {setup.nativeReview.available ? "CapCut inspection tools detected. Desktop permissions are checked during native review; no export required." : "Build an editable test copy and open it in CapCut. Your original stays unchanged."}
+      Review uses project files and the app preview. CapCut stays under your control.
     </div>
     {connectionsOpen && <aside aria-label="Workspace tools and connections" className="bg-[#080c14] px-5 py-4 text-slate-100"><div className="mx-auto max-w-6xl"><OnlineFeatures installed={Boolean(setup.plugin.installed)} /></div></aside>}
     {!setup.isolation.available && <p role="alert" className="bg-[#111b2a] px-6 py-3 text-sm text-amber-100">{setup.isolation.reason}</p>}
@@ -112,7 +112,7 @@ export default function StartupWorkspace() {
           {['error', 'idle'].includes(setup.stage) && <button className="min-h-11 rounded-xl border border-white/20 px-4 text-sm hover:bg-white/5 disabled:opacity-50" disabled={busy} onClick={() => void retrySetup()}>{busy ? "Resuming setup…" : "Resume tool setup"}</button>}
         </div>}
       </section>
-      {setup?.platform === "darwin" && <NativePermissionCheck />}
+      {setup?.platform === "darwin" && <details className="mt-6 text-sm text-slate-400"><summary>Optional Mac desktop diagnostics (not required for editing)</summary><NativePermissionCheck /></details>}
       {setup?.account.signedIn && <OnlineFeatures installed={Boolean(setup?.plugin.installed)} />}
       {setup?.account.signedIn && <p className="mt-5 text-sm leading-6 text-amber-100">{setup.nativeReview.reason}</p>}
       {setup?.account.signedIn && !setup.isolation.available && <p className="mt-4 text-sm leading-6 text-amber-100">{setup.isolation.reason}</p>}

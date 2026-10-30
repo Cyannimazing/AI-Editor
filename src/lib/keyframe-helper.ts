@@ -127,8 +127,6 @@ export async function resolveTimelineClip(projectId: string, clipId: string, sig
 }
 
 export async function openCapCutProject(projectId: string) {
-  const project = (await listProjects()).find((item) => item.id === projectId);
-  if (!project) throw new Error("Selected CapCut project was not found.");
-  await promisify(execFile)(process.execPath, [join(process.cwd(), "scripts", "capcut-session.mjs"), "open", project.path], { timeout: 45000, windowsHide: true });
-  return { projectName: project.name };
+  void projectId;
+  throw new Error('AI-Editor does not open or close CapCut. Open the project yourself when you are ready.');
 }

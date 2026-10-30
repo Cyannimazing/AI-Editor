@@ -77,7 +77,7 @@ export async function createLocalEditingSession({ root, job: input, role, signal
       return textResult({ scope: spec.editingScope, canvas: dimensions, framing: spec.framing,
         controls: { keyframes: ['scale', 'x', 'y', 'rotation', 'opacity', 'volume', 'brightness', 'contrast', 'saturation'],
           easing: ['linear', 'ease-in', 'ease-out', 'ease-in-out', 'hold'], coordinates: 'x=1: half canvas right; y=1: half canvas UP; seconds local to each segment.',
-          rule: 'Native Bezier curves, not contact-sheet guesses. Fill the picture first. Use timed reference/source frames to choose peak, overshoot, rebound and settling. Optical effects require separate resources and native evidence.' },
+          rule: 'Native Bezier curves, not contact-sheet guesses. Fill the picture first. Use timed reference/source frames to choose peak, overshoot, rebound and settling. Optical effects need matching resources. Normal file-and-preview review does not capture or control CapCut; native appearance outside renderer coverage remains unresolved.' },
         fonts: availableTextFonts().map(({ id, name }) => ({ id, name })),
         audio: { available: spec.editingScope !== 'keyframes', planVersion: 5, synthesis: 'Local sine/noise layers, frequency sweeps, envelopes and pan; separate editable native audio tracks with volume keys. No song/voice model or paid service.',
           evidence: await readJson('audio-mix-report.json').catch(error => { if (error.code === 'ENOENT') return null; throw error; }) },

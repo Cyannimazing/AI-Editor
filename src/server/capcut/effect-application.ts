@@ -7,7 +7,7 @@ import { runCancellableProcess } from '../../lib/cancellable-process';
 import { searchCapcutMaterials } from './plugin';
 import { effectBundleFiles, inspectEffectResource, selectOfficialEffect } from './effect-resources.mjs';
 import { assertNoLinks } from '../security/paths';
-import { acquireEffectResources, waitForEffectResources } from './effect-acquisition.mjs';
+import { waitForEffectResources } from './effect-acquisition.mjs';
 
 type Entry = { slug: string; name: string; is_vip: boolean; md5: string; resource_id: string; effect_id: string };
 type Item = { resource_id: string; stdraft_uri: string; title?: string; name?: string; is_vip?: boolean };
@@ -41,16 +41,9 @@ export async function discoverOfficialEffects(input: {
     discovered[slug] = { entry, item, resource };
   }
   const missing = Object.values(discovered).filter(({ entry, item, resource }) => !resource.available && !input.attemptedAcquisitions.has(`${item.resource_id}:${entry.md5}`));
-  for (let offset = 0; offset < missing.length; offset += 8) {
-    const batch = missing.slice(offset, offset + 8);
-    for (const { entry, item } of batch) input.attemptedAcquisitions.add(`${item.resource_id}:${entry.md5}`);
-    const resources = await acquireEffectResources({ job: input.job, requests: batch, signal: input.signal, onLog: input.onLog });
-    if (!resources || resources.length !== batch.length) throw new Error('Native resource acquisition returned an incomplete result.');
-    resources.forEach((resource: ReturnType<typeof inspectEffectResource>, index: number) => {
-      batch[index].resource = resource;
-      input.onLog(resource.available ? `CapCut downloaded ${batch[index].entry.name}. Its native controls are ready for planning; visual verification is still required.`
-        : `CapCut could not obtain ${batch[index].entry.name}. The missing resource remains unverified.`);
-    });
+  for (const { entry, item } of missing) {
+    input.attemptedAcquisitions.add(`${item.resource_id}:${entry.md5}`);
+    input.onLog(`${entry.name} is not installed locally. Automatic CapCut downloads are disabled because they require opening the desktop app. This resource remains unavailable.`);
   }
   return discovered;
 }

@@ -14,7 +14,7 @@ export function permissionCheckResult(state) {
     ? 'NATIVE_MACOS_SCREEN_RECORDING_REQUIRED' : 'NATIVE_PREFLIGHT_READY';
   return { ok, compatibility: 'passed', code, accessibility: state.accessibility, screenRecording: state.screenRecording,
     screenCaptureBinding: state.screenCaptureBinding,
-    message: ok ? 'Accessibility and Screen Recording checks passed. You can now try the disposable edit; Automation and actual CapCut player inspection are checked during that run.' : nativeFailureMessages[code] };
+    message: ok ? 'Accessibility and Screen Recording checks passed. This is an optional diagnostic. Normal editing uses files and the preview without desktop capture.' : nativeFailureMessages[code] };
 }
 
 /** Same JXA process as editing, but no project, screenshot, AI worker or Apple event. */

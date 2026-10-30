@@ -1,5 +1,7 @@
 # Mac native review: permissions and temporary copies
 
+> Historical desktop workflow / optional developer diagnostics. Normal editing now uses [file and preview review](preview-review-2026-10-30.md) and never opens, closes or captures CapCut. Desktop permissions and automatic resource acquisition described below are not required by Run.
+
 ## What the returned audit establishes
 
 The supplied `MAC_NATIVE_REVIEW_AUDIT.md` reports a successful 10.471667-second zoom candidate with editable native scale curves from 100% to 130%, retained audio, a playable approximate preview and passing structural checks. Native player inspection stopped before any window capture because Accessibility trust was missing. This is a host-permission failure; changing the zoom curve cannot fix it.

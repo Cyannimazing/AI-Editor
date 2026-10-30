@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { packageJobResources } from '../src/server/capcut/package-resources.mjs';
+import { assertProjectWriteVersion } from '../src/server/capcut/project-version.mjs';
 
 function assertClosed() {
   if (process.platform === 'darwin') {
@@ -56,6 +57,8 @@ function rebase(value, candidate, destination) {
 
 export async function commitCandidate(candidate, destination) {
   assertClosed();
+  // Reject incompatible documents before staging any assets into the destination.
+  assertProjectWriteVersion(candidate); assertProjectWriteVersion(destination);
   const { draft } = await activeDraft(candidate);
   const { file, draft: original } = await activeDraft(destination);
   for (const name of ['assets', 'subdraft', 'subdrafts']) {

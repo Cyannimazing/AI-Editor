@@ -4,6 +4,8 @@ function diagnosticText(error) {
   return { message, stderr, combined: `${stderr}\n${message}` };
 }
 
+export const versionBoundaryMessage = 'This project version is outside the installed CapCut CLI compatibility evidence. No compatibility override was used. A sanitized disposable project from this version and a tested adapter are needed before editing it safely.';
+
 const launcherHelp = 'Use the app that starts the AI-Editor server: Terminal/iTerm, or VS Code/Codex when started from its terminal. Confirm the app named by macOS, then fully quit and reopen that launcher and restart AI-Editor.';
 export const nativeFailureMessages = Object.freeze({
   NATIVE_MACOS_PREFLIGHT_UNSUPPORTED: 'macOS native-review compatibility check failed: AI-Editor could not call the Screen Recording preflight API. This does not establish a permission denial. Update AI-Editor and run Check Mac permissions before another edit; if it persists, share that check\'s report.',
@@ -28,12 +30,13 @@ export function nativeFailureCode(error) {
 
 /** These conditions cannot be corrected by rewriting the editing plan. */
 export function requiresHostAttention(error) {
-  return Boolean(nativeFailureCode(error)) || /Native capture interrupted:|CapCut could not receive focus|CapCut lost focus|CapCut (?:window changed|window disappeared|moved before input|is minimized|has no usable visible window)|A CapCut dialog is blocking|macOS .*permission|unavailable to this Codex account|sign in|permission|sandbox/i.test(diagnosticText(error).combined);
+  return error?.code === 'CAPCUT_VERSION_UNSUPPORTED' || Boolean(nativeFailureCode(error)) || /version-boundary|Native capture interrupted:|CapCut could not receive focus|CapCut lost focus|CapCut (?:window changed|window disappeared|moved before input|is minimized|has no usable visible window)|A CapCut dialog is blocking|macOS .*permission|unavailable to this Codex account|sign in|permission|sandbox/i.test(diagnosticText(error).combined);
 }
 
 /** Keep a useful tool finding without exposing an entire command/Node stack to the UI. */
 export function editingFailureMessage(error) {
   const { message, stderr, combined } = diagnosticText(error);
+  if (error?.code === 'CAPCUT_VERSION_UNSUPPORTED' || /refused \[version-boundary\]/.test(combined)) return versionBoundaryMessage;
   const nativeCode = nativeFailureCode(error);
   if (nativeCode && !['NATIVE_REVIEW_FAILED', 'NATIVE_REVIEW_COPY_FAILED'].includes(nativeCode)) return nativeFailureMessages[nativeCode];
   if (/Native capture interrupted: another window covers CapCut/i.test(combined))

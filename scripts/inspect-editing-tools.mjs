@@ -56,8 +56,8 @@ const result = { version: 1, inspectedAt: new Date().toISOString(), platform: pr
     officialCapcutLocalBuilderInstalled: localEffectBuilder().available,
     parakeetModelVerified: false, kokoroModelVerified: false, localImageVideoModelVerified: false,
     hyperframesBrowserRenderVerified: false, remotionRenderVerified: false },
-  applicationAdapter: { planVersion: 5,
+  applicationAdapter: { planVersion: 5, reviewMode: 'file-and-preview', automaticDesktopControl: false,
     executable: ['source transforms and volume', 'v5 local procedural SFX/music composition with editable native audio tracks and volume curves, retained synthesis recipes, source-preserving measured preview mix', 'complete native transform/opacity/volume/brightness/contrast/saturation curves with hold support', 'native editable timed text and text keyframes', 'local script-free vector generation with retained SVG source and transparent PNG', 'independent image and duplicate-source overlay layers', 'native blend modes', 'exact no-cost catalog resource binding for native scene/character effects (playback still requires verification)', 'controller-mediated official CapCut material discovery selected by the planner', 'conditional motion/caption/audio specialist scheduling and lead integration', 'HyperFrames + GSAP local preview sampled from serialized native curves when local Chrome is available', 'independent per-technique reviews and enforced bounded repair'],
-    gaps: ['general filters/masks/transition dispatch', 'cuts/retiming dispatch', 'local transcription/model setup dispatch', 'native system-audio capture', 'real macOS player acceptance'],
+    gaps: ['general filters/masks/transition dispatch', 'cuts/retiming dispatch', 'local transcription/model setup dispatch', 'native system-audio capture', 'native playback inspection is outside normal editing'],
     rule: 'An adapter gap is not evidence the installed CLI lacks a capability. Documentation does not itself implement an adapter.' } };
 process.stdout.write(JSON.stringify(result));

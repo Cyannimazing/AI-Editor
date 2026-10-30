@@ -1,8 +1,10 @@
-import { prepareNativeCopy } from './native-copy.mjs';
+import { refuseDesktopControl } from './desktop-policy.mjs';
 
-/** User review and automatic inspection share the same non-repairing publisher. */
-export async function openCandidateTestCopy(candidatePath: string, revision: string, jobPath: string) {
-  const copy = await prepareNativeCopy(candidatePath, revision, undefined, jobPath);
-  return { projectName: copy.projectName, status: copy.status, projectVisible: copy.projectVisible,
-    receiptPath: copy.receiptPath };
+/** Retain the old API entry point without letting an older browser control the desktop. */
+export async function openCandidateTestCopy(candidatePath: string, revision: string, jobPath: string): Promise<{
+  projectName: string; status: string; projectVisible: boolean; receiptPath: string;
+}> {
+  void candidatePath; void revision; void jobPath;
+  refuseDesktopControl();
+  throw new Error('Desktop control is disabled.');
 }

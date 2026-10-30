@@ -1,5 +1,7 @@
 # Local CapCut player review
 
+> Historical desktop workflow / optional developer diagnostics. Normal editing now uses [file and preview review](preview-review-2026-10-30.md) and never opens, closes or captures CapCut. Desktop permissions and automatic resource acquisition described below are not required by Run.
+
 Normal editing does not export or upload a video. Codex plans techniques, the official plugin supplies supported discovery/local effect operations, and AI-Editor's desktop adapter writes a separate native candidate. Structural checks read the saved components; independent reviewers inspect captured player frames when the desktop adapter can identify the project, player viewport and exact frame time.
 
 The controller opens an isolated registered copy, steps its playhead, checks the visible timecode, crops only the observed player canvas and records original screenshots, normalized frames and hashes. Short intervals receive every frame (up to 90). Longer intervals use a bounded sample rate, explicitly reported to reviewers. Missing/ambiguous timestamps, moved windows, changed files and unknown layouts stop native verification. It gracefully closes CapCut to flush autosave and checks the saved native document against the candidate. The automatic correction loop uses that evidence; originals still require approval. The retained candidate can be opened for final user review. No Export button or cloud-sync control is used by this path.
