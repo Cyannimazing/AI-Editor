@@ -22,7 +22,7 @@ export type ProjectDraft = {
   materials?: { videos?: VideoMaterial[]; speeds?: { id: string; speed?: number; curve_speed?: unknown }[] };
 };
 export type ClipSummary = { id: string; name: string; trackName: string; startUs: number; durationUs: number };
-export type ProjectSummary = { id: string; name: string; path: string; hasTimelineContent: boolean; clips: ClipSummary[] };
+export type ProjectSummary = { id: string; name: string; path: string; kind: 'project' | 'temporary-review' | 'test-project'; hasTimelineContent: boolean; clips: ClipSummary[] };
 
 function projectFolder(id: string) {
   const local = id.startsWith("local:");
@@ -32,21 +32,46 @@ function projectFolder(id: string) {
 }
 
 export async function listProjects(includeLocal = true, signal?: AbortSignal): Promise<ProjectSummary[]> {
+  return (await discoverProjects(includeLocal, signal)).projects;
+}
+
+export async function discoverProjects(includeLocal = false, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const projects: ProjectSummary[] = [];
+  const discovery = { rootStatus: 'available' as 'available' | 'missing' | 'unreadable',
+    capcutProjectsFound: 0, hiddenReviewCopies: 0, unreadableProjects: [] as { id: string; name: string; message: string }[] };
   for (const [root, prefix] of [[draftsRoot, ""], [localProjects, "local:"]] as const) {
   if (prefix && !includeLocal) continue;
-  const folders = existsSync(/* turbopackIgnore: true */ root) ? await readdir(/* turbopackIgnore: true */ root, { withFileTypes: true }) : [];
-  for (const entry of folders.filter((item) => item.isDirectory())) {
+  const folders = await readdir(/* turbopackIgnore: true */ root, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (!prefix) discovery.rootStatus = error.code === 'ENOENT' ? 'missing' : 'unreadable';
+    return [];
+  });
+  for (const entry of folders.filter((item) => item.isDirectory() && !/^(?:\.recycle_bin|\.cloud_cache_.*)$/.test(item.name))) {
     signal?.throwIfAborted();
+    const path = join(root, entry.name);
+    // CapCut cache/recycle folders are not projects. Recognizable but broken
+    // project documents must be reported instead of silently disappearing.
     try {
-      const { folder: path, draft } = await readProjectDraft(prefix + entry.name, signal);
+      await containedPath(root, path);
+      const names = await readdir(/* turbopackIgnore: true */ path);
+      if (!['draft_content.json', 'draft_info.json', 'template-2.tmp', 'draft_meta_info.json', 'Timelines'].some(name => names.includes(name))) continue;
+    } catch {
+      signal?.throwIfAborted();
+      if (!prefix) discovery.capcutProjectsFound++;
+      discovery.unreadableProjects.push({ id: prefix + entry.name, name: entry.name,
+        message: 'This folder could not be accessed safely. Check its file permissions, then refresh.' });
+      continue;
+    }
+    if (!prefix) discovery.capcutProjectsFound++;
+    try {
       // Review fixtures are not editing destinations. Do not infer ownership
       // from a user's project name; only our explicit marker hides a copy.
-      if (!includeLocal) {
-        const marker = await readFile(join(path, '.ai-editor-review.json'), 'utf8').then(JSON.parse).catch(() => null);
-        if (marker?.kind === 'temporary-review') continue;
+      await containedPath(root, path);
+      const marker = await readFile(join(path, '.ai-editor-review.json'), 'utf8').then(JSON.parse).catch(() => null);
+      if (!includeLocal && marker?.kind === 'temporary-review') {
+        discovery.hiddenReviewCopies++; continue;
       }
-      if (!Array.isArray(draft.tracks)) continue;
+      const { draft } = await readProjectDraft(prefix + entry.name, signal);
       let name = draft.name || entry.name;
       try {
         const metadata = JSON.parse(await readFile(join(path, "draft_meta_info.json"), "utf8")) as { draft_name?: string };
@@ -59,11 +84,32 @@ export async function listProjects(includeLocal = true, signal?: AbortSignal): P
           trackName: track.name || `Video track ${index + 1}`, startUs: segment.target_timerange.start,
           durationUs: segment.target_timerange.duration }];
       }));
-      projects.push({ id: prefix + entry.name, name, path, hasTimelineContent: draft.tracks.some((track) => track.segments?.length), clips });
-    } catch { signal?.throwIfAborted(); continue; }
+      projects.push({ id: prefix + entry.name, name, path,
+        kind: marker?.kind === 'temporary-review' ? 'temporary-review' : prefix ? 'test-project' : 'project',
+        hasTimelineContent: draft.tracks.some((track) => track.segments?.length), clips });
+    } catch {
+      signal?.throwIfAborted();
+      discovery.unreadableProjects.push({ id: prefix + entry.name, name: entry.name,
+        message: 'The saved timeline could not be read safely. Download its compatibility report for details.' });
+    }
   }
   }
-  return projects;
+  return { projects, discovery };
+}
+
+export async function projectCompatibilityReport(projectId: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const location = projectFolder(projectId);
+  try {
+    const folder = await containedPath(location.root, location.folder);
+    const { stdout } = await promisify(execFile)(process.execPath,
+      [join(process.cwd(), 'scripts/project-compatibility.mjs'), folder],
+      { timeout: 30000, maxBuffer: 4_000_000, windowsHide: true, signal });
+    return JSON.parse(stdout);
+  } catch {
+    signal?.throwIfAborted();
+    throw new Error('Could not collect the compatibility report. Check project access and local tool setup, then try again.');
+  }
 }
 
 export async function readProjectDraft(projectId: string, signal?: AbortSignal) {

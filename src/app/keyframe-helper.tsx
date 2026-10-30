@@ -9,7 +9,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ClipSelection } from './clip-selection';
 
 type Clip = { id: string; name: string; trackName: string; startUs: number; durationUs: number };
-type Project = { id: string; name: string; hasTimelineContent: boolean; clips: Clip[] };
+type Project = { id: string; name: string; kind?: 'project' | 'temporary-review' | 'test-project'; hasTimelineContent: boolean; clips: Clip[] };
+type Discovery = { rootStatus: 'available' | 'missing' | 'unreadable'; capcutProjectsFound: number; hiddenReviewCopies: number;
+  unreadableProjects: { id: string; name: string; message: string }[] };
 type EditResult = { projectId: string; projectName: string; applied: string[]; toolsUsed: string[]; notes: string; backup: string;
   scope?: string; selectedClipIds?: string[]; previewLabel?: string; projectPlan?: { summary: string; clips: { clipId: string; action: string; instruction: string; reason: string }[]; unsupported: string[] };
   model?: string; access?: string; iterations?: number; verified?: boolean; evidencePath?: string; revision: string; previewUrl?: string;
@@ -22,6 +24,8 @@ const button = "min-h-11 rounded-xl bg-emerald-300 px-5 py-3 text-sm font-semibo
 
 export default function KeyframeHelper({ setupComplete }: { setupComplete: boolean }) {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [discovery, setDiscovery] = useState<Discovery>();
+  const [downloadingReport, setDownloadingReport] = useState(false);
   const [projectId, setProjectId] = useState("");
   const [clipIds, setClipIds] = useState<string[]>([]);
   const [editScope, setEditScope] = useState<'project' | 'clips'>('project');
@@ -50,6 +54,7 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
     const projectData = await projectsResponse.json();
     if (!projectsResponse.ok) throw new Error(projectData.error || "Could not load projects.");
     const available = projectData.projects as Project[];
+    setDiscovery(projectData.discovery);
     setProjects(available);
     setProjectId((current) => available.some((project) => project.id === current) ? current : available.length === 1 ? available[0].id : "");
   }, [includeLocal]);
@@ -181,6 +186,19 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
     finally { setStarting(false); }
   }
 
+  async function downloadCompatibility(id: string) {
+    setDownloadingReport(true);
+    try {
+      const response = await apiFetch(`/api/helper?download=compatibility&projectId=${encodeURIComponent(id)}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error((await response.json()).error || 'Could not collect the compatibility report.');
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a'); link.href = url; link.download = 'ai-editor-compatibility.json';
+      document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not collect the report.'); }
+    finally { setDownloadingReport(false); }
+  }
+
   const running = starting || status === "running" || status === "cancelling" || status === "committing";
   function chooseReference(file: File | null) {
     setReference(file);
@@ -210,14 +228,21 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
           <label className="block text-sm text-slate-300">CapCut project
             <select className={field} value={projectId} disabled={running} onChange={(event) => { setProjectId(event.target.value); setClipIds([]); setEditScope('project'); setRawVideo(null); }}>
               <option value="">Select project</option>
-              {projects.map((project) => <option key={project.id} value={project.id}>{project.name} — {project.hasTimelineContent ? `${project.clips.length} video clips` : "Empty timeline"}</option>)}
+              {projects.map((project) => <option key={project.id} value={project.id}>{project.name}{project.kind === 'temporary-review' ? ' (temporary review copy)' : project.kind === 'test-project' ? ' (test project)' : ''} — {project.hasTimelineContent ? `${project.clips.length} video clips` : "Empty timeline"}</option>)}
             </select>
           </label>
           <button className="text-xs font-medium text-emerald-300 hover:text-emerald-200" disabled={running} onClick={() => void refresh().catch((cause) => setError(String(cause)))}>Refresh projects</button>
           <button className="ml-4 min-h-11 text-xs font-medium text-emerald-300" disabled={running} onClick={() => void createProject()}>Create disposable test project</button>
-          <label className="flex min-h-11 items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={includeLocal} disabled={running} onChange={event => setIncludeLocal(event.target.checked)} />Show AI-Editor test fixtures</label>
+          <label className="flex min-h-11 items-center gap-2 text-xs text-slate-400"><input type="checkbox" checked={includeLocal} disabled={running} onChange={event => setIncludeLocal(event.target.checked)} />Show temporary review copies and test projects</label>
+          {!!discovery?.hiddenReviewCopies && <p className="text-xs text-slate-300">{discovery.capcutProjectsFound} saved CapCut projects found. {discovery.hiddenReviewCopies} temporary review {discovery.hiddenReviewCopies === 1 ? 'copy is' : 'copies are'} hidden. Use the checkbox above to show them.</p>}
+          {discovery && discovery.rootStatus !== 'available' && <p className="text-sm text-amber-200">{discovery.rootStatus === 'missing' ? 'The configured CapCut project folder was not found. Check your CapCut save location and the project-folder setting in the README.' : 'AI-Editor cannot read the CapCut project folder. Check the launching app’s file permissions, then refresh.'}</p>}
+          {discovery?.unreadableProjects.map(item => <div key={item.id} className="rounded-lg border border-amber-300/30 p-3 text-xs text-amber-100">
+            <p>{item.name}: {item.message}</p>
+            <button className="mt-2 min-h-11 text-emerald-300" disabled={running || downloadingReport} onClick={() => void downloadCompatibility(item.id)}>Download compatibility report</button>
+          </div>)}
           <p className="text-xs leading-5 text-slate-400">{project ? `Approved changes are saved back to “${project.name}”. A private working copy protects your project until approval.` : 'Select the existing project you want to update.'}</p>
-          {projects.length === 0 && <p className="text-sm text-amber-200">No local projects found. Save a project in CapCut, then refresh.</p>}
+          {project && <div className="text-xs text-slate-400"><button className="min-h-11 text-emerald-300" disabled={running || downloadingReport} onClick={() => void downloadCompatibility(project.id)}>{downloadingReport ? 'Collecting report…' : 'Download compatibility report'}</button><p>Checks the saved project version, keyframes and media paths without opening CapCut. The report excludes media, captions and personal paths.</p></div>}
+          {projects.length === 0 && discovery?.rootStatus === 'available' && discovery.capcutProjectsFound === 0 && <p className="text-sm text-amber-200">No saved projects found in the configured CapCut folder. Save a project in CapCut, then refresh.</p>}
           {project?.hasTimelineContent ? <ClipSelection projectId={project.id} clips={project.clips} scope={editScope} selected={clipIds} disabled={running} onScope={setEditScope} onSelected={setClipIds} /> : <label className="block text-sm text-slate-300">Raw footage to add and edit
             <input className={field} type="file" accept="video/mp4,video/quicktime,video/webm,video/x-matroska" disabled={running} onChange={(event) => setRawVideo(event.target.files?.[0] ?? null)} />
           </label>}

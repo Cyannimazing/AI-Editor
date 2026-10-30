@@ -120,6 +120,14 @@ Defaults: one build plus three corrections, 30-minute deadline, standard model s
 
 Reusable technique saving and reuse are **deferred** for this release. Their workspace controls are removed and new save/reuse requests are disabled. Existing saved data is retained.
 
+## Missing projects or a compatibility refusal
+
+The project picker hides AI-Editor's marked temporary review copies by default. It shows how many are hidden; select **Show temporary review copies and test projects** to reveal them. Their names include a label so they are not confused with your original editing destination. Unreadable project folders are reported separately instead of being silently omitted.
+
+Select a project and click **Download compatibility report** to collect its version, saved timing/keyframe values and media-access results. This works without starting an edit or opening CapCut. Share that JSON when reporting a problem; it excludes media, captions, project names and personal paths. The report checks access from AI-Editor, not CapCut's separate permissions or playback.
+
+If an old result still shows **Native capture** or **Inspect temporary review copy**, update and restart the app. An old failed job remains failed; a new workflow does not retroactively approve its candidate. CapCut **18.2** still needs format evidence and a tested adapter before the pinned CLI can write it safely. A working preview does not remove that version restriction. See [the report and retest guide](docs/project-compatibility-reports-2026-10-30.md).
+
 ## Code map
 
 | Location | Responsibility |
