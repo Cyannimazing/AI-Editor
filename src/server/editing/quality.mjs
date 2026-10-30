@@ -1,4 +1,8 @@
 const findingKey = finding => JSON.stringify([finding.component, finding.timeSeconds, finding.expected, finding.observed]);
+export const reviewLimitations = Object.freeze({
+  native_playback: 'CapCut playback was not inspected. This review covers saved controls and the app preview.',
+  audio_listening: 'Audio was checked through file and signal evidence; perceptual listening quality was not assessed.',
+});
 
 /** Prefer actual native pixels for the expensive pair of model assessments. */
 export function needsDesignReview(nativeAvailable, measuredDefects) {
@@ -30,7 +34,7 @@ export function candidateStatusNotes({ verified, previewReady, quality }) {
 /** Reviewers cannot erase each other's findings or turn missing evidence into a pass. */
 export function combineReviews(reports, techniques, nativeVerified, candidateDigest, unresolvedRequirements = [], reviewMode = 'native') {
   if (!['native', 'preview'].includes(reviewMode) || reviewMode === 'preview' && nativeVerified) throw new Error('Invalid review evidence mode.');
-  const defects = new Map(), unknowns = new Set(), assessments = [];
+  const defects = new Map(), unknowns = new Set(), limitations = new Set(), assessments = [];
   if (reports.length !== 2) unknowns.add('Both independent visual and manager assessments are required.');
   for (const requirement of unresolvedRequirements) {
     if (typeof requirement !== 'string' || !requirement.trim()) throw new Error('Invalid unresolved requirement.');
@@ -43,6 +47,11 @@ export function combineReviews(reports, techniques, nativeVerified, candidateDig
       defects.set(findingKey(defect), defect);
     }
     report.unknowns.forEach(item => { if (typeof item !== 'string') throw new Error('Invalid review uncertainty.'); unknowns.add(item); });
+    if (report.limitations !== undefined && !Array.isArray(report.limitations)) throw new Error('Invalid review limitations.');
+    for (const code of report.limitations || []) {
+      if (!Object.hasOwn(reviewLimitations, code) || code === 'native_playback' && reviewMode !== 'preview') throw new Error('Invalid review limitation.');
+      limitations.add(reviewLimitations[code]);
+    }
     const seen = new Set();
     for (const finding of report.techniques) {
       if (!techniques.some(item => item.id === finding.id) || seen.has(finding.id) || !['matched', 'defect', 'unverified'].includes(finding.status) || typeof finding.evidence !== 'string' || !finding.evidence.trim()) throw new Error('Invalid per-technique review.');
@@ -70,7 +79,7 @@ export function combineReviews(reports, techniques, nativeVerified, candidateDig
   return { version: 1, candidateDigest, reviewMode, decision: hasDefects ? 'revise' : !evidenceAvailable || unresolved ? 'blocked' : 'ready',
     summary: hasDefects ? 'Corrections are required.' : !evidenceAvailable || unresolved ? 'Required verification remains incomplete.'
       : reviewMode === 'preview' ? 'File and preview checks passed. Review before applying; CapCut playback was not inspected.' : 'All required comparisons passed.',
-    defects: [...defects.values()], unknowns: [...unknowns], techniques: coverage, nativeVerified };
+    defects: [...defects.values()], unknowns: [...unknowns], limitations: [...limitations], techniques: coverage, nativeVerified };
 }
 
 export function assertTechniqueContinuity(required, plan) {

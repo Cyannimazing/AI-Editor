@@ -16,7 +16,7 @@ type EditResult = { projectId: string; projectName: string; applied: string[]; t
   scope?: string; selectedClipIds?: string[]; previewLabel?: string; projectPlan?: { summary: string; clips: { clipId: string; action: string; instruction: string; reason: string }[]; unsupported: string[] };
   model?: string; access?: string; iterations?: number; verified?: boolean; evidencePath?: string; revision: string; previewUrl?: string;
   quality?: { reviewMode?: 'preview' | 'native'; nativeVerified?: boolean; decision: string; summary: string; defects: { component: string; timeSeconds: number; expected: string; observed: string }[];
-    techniques: { id: string; name: string; status: string; evidence: string[] }[]; unknowns: string[] } };
+    techniques: { id: string; name: string; status: string; evidence: string[] }[]; unknowns: string[]; limitations?: string[] } };
 type Job = { id: string; status: "running" | "cancelling" | "cancelled" | "complete" | "failed" | "awaiting_approval" | "committing" | "blocked" | "discarded" | "interrupted"; canCancel: boolean; transcript: string[]; next: number; error?: string; result?: EditResult; previewUrl?: string; diagnostic?: Record<string, unknown> };
 
 const field = "mt-2 w-full rounded-xl border border-white/15 bg-[#0b1220] px-4 py-3 text-sm text-slate-100 outline-none focus:border-emerald-300";
@@ -303,6 +303,7 @@ export default function KeyframeHelper({ setupComplete }: { setupComplete: boole
           </li>)}</ul>
           {result.quality.defects.map((defect, index) => <p key={index} className="mt-2 text-xs text-amber-200">{defect.timeSeconds.toFixed(2)}s · {defect.observed} Expected: {defect.expected}</p>)}
           {result.quality.unknowns.length > 0 && <details className="mt-3 text-xs text-slate-300"><summary>Unresolved verification</summary><ul className="mt-2 space-y-2">{result.quality.unknowns.map((unknown, index) => <li key={index}>{unknown}</li>)}</ul></details>}
+          {!!result.quality.limitations?.length && <details className="mt-3 text-xs text-slate-400"><summary>Review scope · information only</summary><ul className="mt-2 space-y-2">{result.quality.limitations.map((limitation, index) => <li key={index}>{limitation}</li>)}</ul></details>}
         </div>}
         {result.notes && <p className="mt-2 text-xs text-slate-400">{result.notes}</p>}
         {result.previewUrl && <div className="mt-5"><p className="mb-2 text-sm text-slate-300">{result.previewLabel || 'Design preview'} · CapCut-specific effects may differ</p><video controls preload="metadata" src={result.previewUrl} className="max-h-96 w-full rounded-xl bg-black" /></div>}

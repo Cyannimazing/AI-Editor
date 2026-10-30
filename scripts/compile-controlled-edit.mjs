@@ -9,6 +9,7 @@ import { writeMotionCurves, writeCatalogEffect, enableNativeCompositing, assertC
 import { resolveTextFont } from '../src/server/editing/text-fonts.mjs';
 import { assertEditingScope } from '../src/server/editing/edit-scope.mjs';
 import { renderAudioAssets } from '../src/server/editing/audio-synthesis.mjs';
+import { prepareCandidateMedia } from '../src/server/capcut/prepare-media.mjs';
 
 const [jobInput, candidateInput, round = '1'] = process.argv.slice(2);
 if (!/^[1-4]$/.test(round)) throw new Error('Invalid correction round.');
@@ -112,7 +113,9 @@ if (spec.source.clipId) {
   const receipt = enableNativeCompositing(merged, spec.source.clipId);
   if (receipt) execution.push(receipt);
 }
-saveDraft(filePath, merged, { preserveProjectFields: true });
+const mediaPreparation = await prepareCandidateMedia({ draft: merged, original, project: candidate, jobStore: join(root, '.local-tools', 'native-assets') });
+execution.push({ operation: 'native.media.prepare', ...mediaPreparation.receipt });
+saveDraft(filePath, merged, { preserveProjectFields: true, additionalFiles: mediaPreparation.additionalFiles });
 const sourceSegments = merged.tracks.filter(track => track.type === 'video').flatMap(track => track.segments).filter(segment =>
   spec.source.clipId ? segment.id === spec.source.clipId : compiled.refs.source === segment.id);
 const textIds = new Set(generated.tracks.filter(track => track.type === 'text').flatMap(track => track.segments.map(segment => segment.id)));

@@ -1,6 +1,7 @@
 import { readFile, stat, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { matchesSourceBytes } from '../server/editing/media-identity.mjs';
 
 type Range = { start: number; duration: number };
 type Material = { id: string; path?: string; type?: string; apply_target_type?: number; draft?: NativeDraft; [key: string]: unknown };
@@ -146,7 +147,8 @@ export async function validateNativeCandidate(input: {
         if (/^https?:/i.test(item.path)) throw new Error("Download native resources locally before attaching them.");
         const path = resolve(candidatePath, item.path.replace(/##_draftpath_placeholder_[^#]+_##/g, candidatePath));
         if (/\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(path) && item.extra_type_option !== 2 &&
-          !input.sourcePaths.some((source) => resolve(source).toLowerCase() === path.toLowerCase())) {
+          !input.sourcePaths.some((source) => resolve(source).toLowerCase() === path.toLowerCase()) &&
+          !(isInside(candidatePath, path) && await matchesSourceBytes(path, input.sourcePaths))) {
           throw new Error("A generated video would bake the edit. Keep motion, words and effects as native controls; use only the supplied source footage.");
         }
         if (item.extra_type_option === 2 && !draft.tracks.some(track => track.segments.some(segment => segment.material_id === item.id &&

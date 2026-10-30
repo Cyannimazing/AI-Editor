@@ -6,6 +6,7 @@ import { basename, dirname, isAbsolute, join, resolve, relative, sep } from 'nod
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { packageJobResources } from '../src/server/capcut/package-resources.mjs';
 import { assertProjectWriteVersion } from '../src/server/capcut/project-version.mjs';
+import { prepareCandidateMedia } from '../src/server/capcut/prepare-media.mjs';
 
 function assertClosed() {
   if (process.platform === 'darwin') {
@@ -73,9 +74,11 @@ export async function commitCandidate(candidate, destination) {
   }
   const { loadDraft, saveDraft } = await import('../toolchain/node_modules/capcut-cli/dist/draft.js');
   const jobStore = join(fileURLToPath(new URL('../', import.meta.url)), '.local-tools', 'native-assets');
-  await packageJobResources(draft, destination, jobStore);
   loadDraft(destination, { activeTimeline: existsSync(join(destination, 'Timelines')) });
-  saveDraft(file, rebase({ ...draft, id: original.id, name: original.name }, candidate, destination), { preserveProjectFields: true });
+  const finalDraft = rebase({ ...draft, id: original.id, name: original.name }, candidate, destination);
+  const prepared = await prepareCandidateMedia({ draft: finalDraft, original, project: destination, jobStore,
+    stagedResourceRoot: join(fileURLToPath(new URL('../', import.meta.url)), '.local-tools', 'staging') });
+  saveDraft(file, finalDraft, { preserveProjectFields: true, additionalFiles: prepared.additionalFiles });
 }
 
 /** Publish a separate project; never overwrite the source or a previous review. */

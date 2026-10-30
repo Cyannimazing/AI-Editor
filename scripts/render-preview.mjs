@@ -24,7 +24,7 @@ if (!(raw.width > 0 && raw.height > 0 && raw.width * raw.height <= 8_294_400 && 
 for (const input of raw.inputs) {
   if (!isAbsolute(input.path) || !(await lstat(input.path)).isFile()) throw new Error('Preview requires regular local media.');
   const path = await realpath(input.path);
-  if (!inside(job, path) && !originalPaths.has(input.path)) throw new Error('Unknown preview dependency.');
+  if (!inside(job, path) && !inside(join(candidate, 'assets'), path) && !originalPaths.has(input.path)) throw new Error('Unknown preview dependency.');
 }
 // The upstream proxy includes separate audio tracks but omits audio carried by
 // video clips. Add virtual preview-only audio tracks after validating media.

@@ -63,6 +63,8 @@ Use a disposable project for the first run. Keep the selected project unchanged 
 
 The preview uses the saved controls and supports native motion/text layout, but it is not CapCut's renderer. A passing preview review does not certify native playback. Missing required effects, resources or renderer coverage are shown explicitly and cannot be silently approved. See [the preview review workflow](docs/preview-review-2026-10-30.md).
 
+**Review scope · information only** lists checks outside the requested file-and-preview review, such as listening to unchanged audio or watching playback in CapCut. These notes do not block Apply. **Unresolved verification** means evidence needed for your actual request is missing, so Apply stays unavailable. New imported/generated media is packaged and registered before review, then linked to its final project location during Apply. After updating from the earlier review-classification bug, run the edit again; old blocked results are not automatically approved.
+
 ### Mac permissions and diagnostics
 
 Normal editing and preview review do **not** need Accessibility, Screen Recording or Automation permissions. Allow file access to your selected workspace/media folders if macOS requests it. Full Disk Access and disabling Gatekeeper are not required.

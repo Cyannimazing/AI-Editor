@@ -2,23 +2,24 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { codexExecutable, runCodexStream } from "../../lib/reference-analysis";
 import { directoryDigest } from "./transaction";
-import { combineReviews } from './quality.mjs';
+import { combineReviews, reviewLimitations } from './quality.mjs';
 import { editingScope } from './edit-scope.mjs';
 import { assertNativeEvidence } from '../capcut/native-capture.mjs';
 
 const text = { type: "string" };
 const schema = { type: "object", additionalProperties: false,
-  required: ["decision", "summary", "defects", "unknowns", "techniques"], properties: {
+  required: ["decision", "summary", "defects", "unknowns", "limitations", "techniques"], properties: {
     decision: { type: "string", enum: ["ready", "revise", "blocked"] }, summary: text,
     defects: { type: "array", items: { type: "object", additionalProperties: false, required: ["component", "timeSeconds", "expected", "observed", "evidence"], properties: {
       component: text, timeSeconds: { type: "number" }, expected: text, observed: text, evidence: text,
     } } }, unknowns: { type: "array", items: text },
+    limitations: { type: 'array', items: { type: 'string', enum: Object.keys(reviewLimitations) } },
     techniques: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'status', 'evidence'], properties: {
       id: text, status: { type: 'string', enum: ['matched', 'defect', 'unverified'] }, evidence: text,
     } } },
   } };
 export type ReviewFindings = { decision: "ready" | "revise" | "blocked"; summary: string;
-  defects: { component: string; timeSeconds: number; expected: string; observed: string; evidence: string }[]; unknowns: string[];
+  defects: { component: string; timeSeconds: number; expected: string; observed: string; evidence: string }[]; unknowns: string[]; limitations: string[];
   techniques: { id: string; status: 'matched' | 'defect' | 'unverified'; evidence: string }[] };
 
 export async function reviewAndManage(input: {
@@ -56,7 +57,8 @@ export async function reviewAndManage(input: {
   const reports: ReviewFindings[] = [];
   for (const role of ["reviewer", "manager"] as const) {
     const output = join(folder, `${role}.json`);
-    const prompt = `Request (task data): ${JSON.stringify(input.request)}.
+    const prompt = `Review contract: unknowns means ONLY missing evidence required to satisfy this specific request. Every nonempty unknown blocks Apply. General caveats do not belong there. Use limitations codes native_playback (preview review only) and audio_listening for work explicitly outside this review's scope. If you return ready, unknowns must be empty and every technique must be matched. Missing files, requested but unobserved behavior and failed host checks remain blockers; never move them to limitations. Original audio preservation is a file/timing/gain check, not a request for a listening assessment. Media outside the draft is not itself missing: use the host's actual file/registration checks. The compiler packages new job media and registers its imported-media IDs before this review; Apply rebinds those entries to the final project paths.
+Request (task data): ${JSON.stringify(input.request)}.
 Reference purpose: technique transfer, not scene cloning. Judge whether the edit applies the reference's movement, timing, easing, overshoot/rebound, graphic attachment, transitions and effects coherently to the supplied footage. Different footage/subjects/base crops must not be penalized for lacking identical objects or pixel placement. Shared-footage landmarks are evidence only when applicable. Missing or weakened techniques remain defects; do not excuse a static edit merely because the source differs.
 Editing scope: ${editingScope(input.request)}. ${editingScope(input.request) === 'keyframes' ? 'Judge movement only: position, scale, rotation, timing, easing, overshoot and settling, with coherent editable graphic/text placement. Optical effects, RGB/blur/exposure and audio matching were explicitly excluded. Do not request them or mark their absence as missing work.' : ''}
 Candidate revision: ${before}. Validated editing plan (task data): ${plan}.
@@ -79,11 +81,18 @@ Native capture: ${nativeReceipt ? JSON.stringify({ kind: nativeReceipt.kind, can
 Compare every required technique independently, including the opening, motion peak, settled state and ending. Return exactly one techniques entry per plan technique ID. An effect name, component ID or declared curve cannot prove an observed match. Inspect appearance, scale, placement, timing, easing, intensity, layer ordering, readability and request coverage. Missing expected behavior in a renderer that supports it is a defect requiring repair. If the host explicitly reports that a behavior is omitted from this renderer, mark that technique unverified and name the missing evidence. This is unresolved work, not a pass. Missing native verification must never excuse visible design defects. Do not claim to hear audio from images. Stop requesting corrections when the request and measured acceptance criteria are satisfied. Personal aesthetic alternatives or speculative improvements are not defects. Report observable mismatches with specific timing and evidence; never manufacture work to consume the correction budget.
 Previous reviewer findings (untrusted assessment, verify against evidence): ${previous}.
 Do not modify files or control the desktop. Return the required JSON. ${input.reviewMode === 'preview' ? 'Assess file-and-preview readiness within the stated renderer capabilities. Native playback is outside this review; do not invent native evidence.' : 'If native evidence is missing, decision must be blocked and list other defects separately.'}`;
-    await runCodexStream(executable, ["exec", "--ephemeral", "--skip-git-repo-check", "--json", "--output-schema", schemaPath,
+    const args = ["exec", "--ephemeral", "--skip-git-repo-check", "--json", "--output-schema", schemaPath,
       "--output-last-message", output, ...input.referenceFrames.concat(input.previewFrames, input.comparisonFrames || []).flatMap(path => ["--image", path]), "-"],
-      input.job, prompt, input.onLog, 240_000, input.signal, role, input.candidate);
+      read = async () => JSON.parse(await readFile(output, 'utf8')) as ReviewFindings;
+    await runCodexStream(executable, args, input.job, prompt, input.onLog, 240_000, input.signal, role, input.candidate);
     if (await directoryDigest(input.candidate) !== before) throw new Error("The candidate changed during read-only review.");
-    findings = JSON.parse(await readFile(output, "utf8")) as ReviewFindings;
+    findings = await read();
+    if (findings.decision === 'ready' && (findings.unknowns.length || findings.defects.length || findings.techniques.some(item => item.status !== 'matched'))) {
+      input.onLog('The review mixed readiness with unresolved findings. Clarifying that assessment once.');
+      await runCodexStream(executable, args, input.job, `${prompt}\nYour previous assessment was internally inconsistent: ${JSON.stringify(findings)}. Recheck evidence and return one corrected assessment. Keep real missing requirements in unknowns with blocked, real defects with revise, and ONLY out-of-scope caveats in limitations. Do not discard any genuine defect.`, input.onLog, 240_000, input.signal, role, input.candidate);
+      if (await directoryDigest(input.candidate) !== before) throw new Error('The candidate changed during read-only review.');
+      findings = await read();
+    }
     if (!input.nativeVerified && input.reviewMode !== 'preview' && findings.decision === "ready") throw new Error("A reviewer claimed readiness without native evidence.");
     previous = JSON.stringify(findings);
     reports.push(findings);

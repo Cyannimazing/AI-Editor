@@ -175,6 +175,7 @@ export async function applyNativeCapCut(input: ApplyInput): Promise<NativeEditRe
         ...defect, component: `${result.sourceName}: ${defect.component}`, timeSeconds: defect.timeSeconds + result.timelineStart,
       }))),
       unknowns: [...new Set([...plan.unsupported, ...results.flatMap(result => result.quality?.unknowns || [])])],
+      limitations: [...new Set(results.flatMap(result => result.quality?.limitations || []))],
       techniques: results.flatMap((result, index) => (result.quality?.techniques || []).map((technique: { id: string; name: string; status: string; evidence: string[] }) => ({ ...technique, id: `clip-${index + 1}/${technique.id}`, name: `${result.sourceName}: ${technique.name}` }))),
     };
     await writeFile(join(folder, 'project-result.json'), JSON.stringify({ originalDigest, finalCandidate: final.candidatePath, revision: final.candidateDigest, plan, evidence, quality }));

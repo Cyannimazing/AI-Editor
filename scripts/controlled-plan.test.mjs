@@ -79,7 +79,9 @@ test('trusted compiler creates an editable native candidate from a validated pla
   const result = loadDraft(draftPath).draft;
   const video = result.tracks.find(track => track.type === 'video' && track.segments.length);
   assert.equal(result.duration, 1000000); assert.equal(video.segments[0].common_keyframes.length, 2);
-  assert.equal(result.materials.videos[0].path, source);
+  assert.ok(result.materials.videos[0].path.startsWith(draftPath.replaceAll('\\', '/')));
+  assert.deepEqual(await readFile(result.materials.videos[0].path), await readFile(source), 'packaging preserves original source bytes');
+  assert.ok(result.materials.videos[0].local_material_id, 'new media is registered before preview review');
   assert.equal(result.materials.texts.length, 1);
   assert.ok(result.materials.texts[0].content.includes('Literal'));
   assert.equal(JSON.parse(await readFile(join(job, 'manifest-1.json'), 'utf8')).supported, true);
@@ -121,10 +123,11 @@ test('trusted compiler creates an editable native candidate from a validated pla
   const effect = Object.values(built.materials).flat().find(material => material.type === 'video_effect');
   assert.equal(effect.apply_target_type, 0);
   assert.equal(effect.bind_segment_id, built.tracks.find(track => track.type === 'video').segments[0].id);
-  assert.equal(built.materials.videos.find(material => material.id !== photo.id).path, source);
+  assert.deepEqual(await readFile(built.materials.videos.find(material => material.id !== photo.id).path), await readFile(source));
   assert.equal(built.tracks.filter(track => track.type === 'effect').length, 2, 'simultaneous effects use independent native tracks');
   const official = built.materials.video_effects.find(material => material.resource_id === '7399468627948440838');
-  assert.equal(official.path, effectFolder);
+  assert.ok(official.path.startsWith(draftPath.replaceAll('\\', '/')));
+  assert.equal(await readFile(join(official.path, 'extra.json'), 'utf8'), '{}');
   assert.deepEqual(official.adjust_params.map(control => [control.name, control.value]), [['effects_adjust_horizontal_shift', 0.7], ['effects_adjust_intensity', 0.85]], 'actual plugin control fields reach the editable native component');
   const lint = await run(process.execPath, [join(root, 'toolchain', 'node_modules', 'capcut-cli', 'dist', 'index.js'), 'lint', draftPath, '--json'], { cwd: root, timeout: 30000, windowsHide: true });
   assert.ok(!JSON.parse(lint.stdout).issues?.some(issue => issue.code === 'caption-overlap'));
